@@ -6,3 +6,4 @@ export {
   type IndexStats,
   type VaultSearchResult,
 } from './indexer.js';
+export { VaultWatcher } from './watcher.js';
