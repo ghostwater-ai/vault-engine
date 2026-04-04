@@ -7,3 +7,8 @@ export {
   type VaultSearchResult,
 } from './indexer.js';
 export { VaultWatcher } from './watcher.js';
+export {
+  DEFAULT_SCORING_CONFIG,
+  type ScoringConfig,
+  type ScoredDocument,
+} from './scoring.js';
