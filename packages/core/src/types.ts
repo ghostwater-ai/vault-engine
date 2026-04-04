@@ -87,3 +87,50 @@ export interface VaultDocument {
   /** The raw markdown body (without frontmatter) */
   rawBody: string;
 }
+
+/**
+ * Options for the query function.
+ *
+ * All options are optional and have sensible defaults.
+ */
+export interface QueryOptions {
+  /** Maximum number of results to return (default: 3) */
+  maxResults?: number;
+
+  /** Minimum compound score threshold (default: 0.30) */
+  minScore?: number;
+
+  /** Minimum BM25 normalized score floor (default: 0.10) */
+  minBm25Score?: number;
+
+  /** Filter results to only these note types */
+  noteTypes?: NoteType[];
+
+  /** Token budget for results (for formatting — not used in core) */
+  tokenBudget?: number;
+
+  /** Context string for post-hoc re-ranking by term overlap */
+  context?: string;
+}
+
+/**
+ * Result of a query operation.
+ *
+ * Includes ranked results, tier metadata, and latency timing.
+ */
+export interface QueryResult {
+  /** Ranked results sorted by final score (descending) */
+  results: import('./scoring.js').ScoredDocument[];
+
+  /** Retrieval tier used (0 = BM25 only for MVP) */
+  tier: number;
+
+  /** Query latency in milliseconds */
+  latencyMs: number;
+
+  /** The original query string */
+  query: string;
+
+  /** Context terms extracted (only present when context was provided) */
+  contextTerms?: string[];
+}

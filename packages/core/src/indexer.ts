@@ -54,10 +54,13 @@ const ENGLISH_STOPWORDS = new Set([
  * Processes a term for indexing and searching.
  * Applies lowercase normalization, stopword removal, and English stemming.
  *
+ * This function is exported so the retrieval module can use the same
+ * term processing for query preprocessing and context tokenization.
+ *
  * @param term - The term to process
  * @returns The processed term, or null/undefined to filter out the term
  */
-function processTerm(term: string): string | null | undefined {
+export function processTerm(term: string): string | null | undefined {
   // Lowercase normalization
   const lower = term.toLowerCase();
 
