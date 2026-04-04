@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "vault": "../../dist/bin/vault.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

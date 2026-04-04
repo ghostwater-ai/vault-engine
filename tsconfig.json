@@ -9,6 +9,7 @@
   "files": [],
   "references": [
     { "path": "./packages/core" },
-    { "path": "./packages/openclaw-plugin" }
+    { "path": "./packages/openclaw-plugin" },
+    { "path": "./bin" }
   ]
 }
