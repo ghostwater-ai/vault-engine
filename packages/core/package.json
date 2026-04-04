@@ -1,0 +1,30 @@
+{
+  "name": "@ghostwater/vault-engine",
+  "version": "0.1.0",
+  "description": "Retrieval engine for structured Markdown knowledge vaults using BM25 + epistemic scoring",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ghostwater-ai/vault-engine.git",
+    "directory": "packages/core"
+  }
+}
