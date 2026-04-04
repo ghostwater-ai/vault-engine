@@ -149,6 +149,13 @@ export interface ScoredDocument {
    * Format: "BM25: 0.42 (raw: 0.72) × (1 + type:+0.15 + confidence:+0.10) = 0.525"
    */
   explanation: string;
+
+  /**
+   * Fraction of context keywords found in this document.
+   * Only present when context re-ranking is applied.
+   * Used as a tiebreaker for similarly-scored results.
+   */
+  contextOverlap?: number;
 }
 
 /**
