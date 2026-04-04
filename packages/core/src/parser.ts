@@ -5,8 +5,8 @@
  * extracting YAML frontmatter, body sections, and wiki-links.
  */
 
-import { readFile } from 'node:fs/promises';
-import { basename, extname } from 'node:path';
+import { readFile, readdir } from 'node:fs/promises';
+import { basename, extname, join, relative } from 'node:path';
 import matter from 'gray-matter';
 import type { BodySection, NoteType, VaultDocument } from './types.js';
 
@@ -163,14 +163,20 @@ function extractDateString(value: unknown): string | undefined {
 }
 
 /**
- * Parses a single markdown file into a VaultDocument.
- *
- * @param filePath - Absolute path to the markdown file
- * @returns The parsed VaultDocument, or null if parsing fails
+ * Internal parse result that includes metadata about parsing.
  */
-export async function parseFile(
+interface ParseResult {
+  document: VaultDocument;
+  /** True if the noteType was explicitly set in frontmatter */
+  hasExplicitType: boolean;
+}
+
+/**
+ * Internal function to parse a markdown file, returning additional metadata.
+ */
+async function parseFileInternal(
   filePath: string
-): Promise<VaultDocument | null> {
+): Promise<ParseResult | null> {
   let content: string;
 
   try {
@@ -218,8 +224,10 @@ export async function parseFile(
   const slug = deriveSlug(filePath);
   const title = deriveTitle(body, slug);
 
-  // Parse note type - defaults to 'experience' if not specified or invalid
-  const noteType = parseNoteType(frontmatter.type) ?? 'experience';
+  // Parse note type - track whether it was explicitly set
+  const parsedNoteType = parseNoteType(frontmatter.type);
+  const hasExplicitType = parsedNoteType !== undefined;
+  const noteType = parsedNoteType ?? 'experience';
 
   // Split body into sections
   const bodySections = splitBodySections(body);
@@ -273,5 +281,150 @@ export async function parseFile(
     document.connections = Array.from(allConnections);
   }
 
-  return document;
+  return { document, hasExplicitType };
+}
+
+/**
+ * Parses a single markdown file into a VaultDocument.
+ *
+ * @param filePath - Absolute path to the markdown file
+ * @returns The parsed VaultDocument, or null if parsing fails
+ */
+export async function parseFile(
+  filePath: string
+): Promise<VaultDocument | null> {
+  const result = await parseFileInternal(filePath);
+  return result ? result.document : null;
+}
+
+/**
+ * Directories to scan within a vault path.
+ * These are the only directories where vault notes live.
+ */
+const INCLUDED_DIRECTORIES = [
+  'experiences',
+  'research/notes',
+  'beliefs',
+  'entities',
+  'bets',
+  'questions',
+  '_topics',
+];
+
+/**
+ * Maps directory paths to their corresponding note types.
+ * Used for inferring noteType when frontmatter doesn't specify it.
+ */
+const DIRECTORY_TO_NOTE_TYPE: Record<string, NoteType> = {
+  experiences: 'experience',
+  'research/notes': 'research',
+  beliefs: 'belief',
+  entities: 'entity',
+  bets: 'bet',
+  questions: 'question',
+  _topics: 'topic',
+};
+
+/**
+ * Recursively collects all .md files from a directory.
+ */
+async function collectMarkdownFiles(dirPath: string): Promise<string[]> {
+  const files: string[] = [];
+
+  let entries;
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch {
+    // Directory doesn't exist or can't be read
+    return files;
+  }
+
+  for (const entry of entries) {
+    const fullPath = join(dirPath, entry.name);
+
+    if (entry.isDirectory()) {
+      // Skip _* prefixed subdirectories (except _topics which is handled at root level)
+      if (entry.name.startsWith('_')) {
+        continue;
+      }
+      const subFiles = await collectMarkdownFiles(fullPath);
+      files.push(...subFiles);
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      files.push(fullPath);
+    }
+  }
+
+  return files;
+}
+
+/**
+ * Infers the note type from a file's path relative to the vault root.
+ * Returns undefined if the path doesn't match a known directory.
+ */
+function inferNoteTypeFromPath(
+  filePath: string,
+  vaultPath: string
+): NoteType | undefined {
+  const relativePath = relative(vaultPath, filePath);
+
+  for (const [dir, noteType] of Object.entries(DIRECTORY_TO_NOTE_TYPE)) {
+    if (relativePath.startsWith(dir + '/') || relativePath.startsWith(dir + '\\')) {
+      return noteType;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Checks if a file is in the _topics directory.
+ */
+function isInTopicsDirectory(filePath: string, vaultPath: string): boolean {
+  const relativePath = relative(vaultPath, filePath);
+  return relativePath.startsWith('_topics/') || relativePath.startsWith('_topics\\');
+}
+
+/**
+ * Parses all markdown files from the scoped directories within a vault.
+ *
+ * Scans only: experiences/, research/notes/, beliefs/, entities/, bets/, questions/, _topics/
+ * Excludes: _maintenance/, root-level files, _* prefixed directories except _topics/
+ *
+ * @param vaultPath - Absolute path to the vault root directory
+ * @returns Array of successfully parsed VaultDocuments (skips failures)
+ */
+export async function parseVaultDirectory(
+  vaultPath: string
+): Promise<VaultDocument[]> {
+  const documents: VaultDocument[] = [];
+
+  // Collect files from each included directory
+  for (const dir of INCLUDED_DIRECTORIES) {
+    const dirPath = join(vaultPath, dir);
+    const files = await collectMarkdownFiles(dirPath);
+
+    for (const filePath of files) {
+      const result = await parseFileInternal(filePath);
+
+      if (result) {
+        const { document: doc, hasExplicitType } = result;
+
+        // For _topics directory, always set noteType to 'topic' regardless of frontmatter
+        if (isInTopicsDirectory(filePath, vaultPath)) {
+          doc.noteType = 'topic';
+        }
+        // Infer noteType from path if frontmatter didn't specify a type
+        else if (!hasExplicitType) {
+          const inferredType = inferNoteTypeFromPath(filePath, vaultPath);
+          if (inferredType) {
+            doc.noteType = inferredType;
+          }
+        }
+
+        documents.push(doc);
+      }
+    }
+  }
+
+  return documents;
 }

@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
-import { parseFile } from './parser.js';
+import { parseFile, parseVaultDirectory } from './parser.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const fixturesDir = join(__dirname, '__fixtures__');
+const vaultFixtureDir = join(fixturesDir, 'vault');
 
 describe('parseFile', () => {
   let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
@@ -295,6 +296,237 @@ describe('parseFile', () => {
 
       expect(result).not.toBeNull();
       expect(result!.date).toBe('ongoing');
+    });
+  });
+});
+
+describe('parseVaultDirectory', () => {
+  let consoleWarnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    consoleWarnSpy.mockRestore();
+  });
+
+  describe('directory scoping', () => {
+    it('scans all included directories', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+
+      // Check we have docs from each directory
+      const paths = docs.map((d) => d.path);
+
+      expect(paths.some((p) => p.includes('/experiences/'))).toBe(true);
+      expect(paths.some((p) => p.includes('/research/notes/'))).toBe(true);
+      expect(paths.some((p) => p.includes('/beliefs/'))).toBe(true);
+      expect(paths.some((p) => p.includes('/entities/'))).toBe(true);
+      expect(paths.some((p) => p.includes('/bets/'))).toBe(true);
+      expect(paths.some((p) => p.includes('/questions/'))).toBe(true);
+      expect(paths.some((p) => p.includes('/_topics/'))).toBe(true);
+    });
+
+    it('excludes _maintenance directory', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const paths = docs.map((d) => d.path);
+
+      expect(paths.some((p) => p.includes('/_maintenance/'))).toBe(false);
+      expect(paths.some((p) => p.includes('do-not-parse'))).toBe(false);
+    });
+
+    it('excludes root-level .md files', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const paths = docs.map((d) => d.path);
+
+      expect(paths.some((p) => p.includes('root-file.md'))).toBe(false);
+      expect(paths.some((p) => p.includes('INDEX.md'))).toBe(false);
+    });
+
+    it('excludes _* prefixed subdirectories except _topics', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const paths = docs.map((d) => d.path);
+
+      // _drafts subdirectory should be excluded
+      expect(paths.some((p) => p.includes('/_drafts/'))).toBe(false);
+      expect(paths.some((p) => p.includes('draft-note.md'))).toBe(false);
+
+      // But _topics should be included
+      expect(paths.some((p) => p.includes('/_topics/'))).toBe(true);
+    });
+  });
+
+  describe('noteType inference from directory path', () => {
+    it('infers noteType: experience for files in experiences/', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const experienceDoc = docs.find((d) =>
+        d.path.includes('/experiences/test-experience.md')
+      );
+
+      expect(experienceDoc).toBeDefined();
+      expect(experienceDoc!.noteType).toBe('experience');
+    });
+
+    it('infers noteType: research for files in research/notes/', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const researchDoc = docs.find((d) =>
+        d.path.includes('/research/notes/test-research.md')
+      );
+
+      expect(researchDoc).toBeDefined();
+      expect(researchDoc!.noteType).toBe('research');
+    });
+
+    it('scans nested subdirectories within included directories', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+
+      // Find the nested research note
+      const nestedDoc = docs.find((d) =>
+        d.path.includes('/research/notes/subtopic/nested-research.md')
+      );
+
+      expect(nestedDoc).toBeDefined();
+      expect(nestedDoc!.noteType).toBe('research');
+      expect(nestedDoc!.slug).toBe('nested-research');
+    });
+
+    it('infers noteType: belief for files in beliefs/', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const beliefDoc = docs.find((d) =>
+        d.path.includes('/beliefs/test-belief.md')
+      );
+
+      expect(beliefDoc).toBeDefined();
+      expect(beliefDoc!.noteType).toBe('belief');
+    });
+
+    it('infers noteType: entity for files in entities/', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const entityDoc = docs.find((d) =>
+        d.path.includes('/entities/test-entity.md')
+      );
+
+      expect(entityDoc).toBeDefined();
+      expect(entityDoc!.noteType).toBe('entity');
+    });
+
+    it('infers noteType: bet for files in bets/', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const betDoc = docs.find((d) => d.path.includes('/bets/test-bet.md'));
+
+      expect(betDoc).toBeDefined();
+      expect(betDoc!.noteType).toBe('bet');
+    });
+
+    it('infers noteType: question for files in questions/', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const questionDoc = docs.find((d) =>
+        d.path.includes('/questions/test-question.md')
+      );
+
+      expect(questionDoc).toBeDefined();
+      expect(questionDoc!.noteType).toBe('question');
+    });
+
+    it('preserves explicit noteType from frontmatter when provided', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      // belief-with-explicit-type.md has type: research in frontmatter
+      const doc = docs.find((d) =>
+        d.path.includes('/beliefs/belief-with-explicit-type.md')
+      );
+
+      expect(doc).toBeDefined();
+      // Explicit type should be preserved
+      expect(doc!.noteType).toBe('research');
+    });
+  });
+
+  describe('_topics directory handling', () => {
+    it('sets noteType to topic for all files in _topics', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      const topicDoc = docs.find((d) =>
+        d.path.includes('/_topics/test-topic.md')
+      );
+
+      expect(topicDoc).toBeDefined();
+      expect(topicDoc!.noteType).toBe('topic');
+    });
+
+    it('overrides frontmatter type with topic for files in _topics', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+      // topic-with-different-type.md has type: belief in frontmatter
+      const doc = docs.find((d) =>
+        d.path.includes('/_topics/topic-with-different-type.md')
+      );
+
+      expect(doc).toBeDefined();
+      // Should still be topic, regardless of frontmatter
+      expect(doc!.noteType).toBe('topic');
+    });
+  });
+
+  describe('error handling', () => {
+    it('returns empty array for non-existent vault path', async () => {
+      const docs = await parseVaultDirectory('/non/existent/path');
+
+      expect(docs).toEqual([]);
+    });
+
+    it('skips files that fail to read', async () => {
+      // parseVaultDirectory should gracefully handle any files it can't read
+      // by skipping them and continuing with other files
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+
+      // All valid files should still be parsed
+      expect(docs.length).toBeGreaterThan(0);
+      expect(docs.some((d) => d.path.includes('test-belief.md'))).toBe(true);
+    });
+  });
+
+  describe('integration - full vault parse', () => {
+    it('returns correct total count of parsed documents', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+
+      // Count expected files (excluding excluded directories)
+      // experiences/: 2 files (test-experience.md, experience-with-type.md) - _drafts excluded
+      // research/notes/: 2 files (test-research.md, subtopic/nested-research.md)
+      // beliefs/: 2 files (test-belief.md, belief-with-explicit-type.md)
+      // entities/: 1 file (test-entity.md)
+      // bets/: 1 file (test-bet.md)
+      // questions/: 1 file (test-question.md)
+      // _topics/: 2 files (test-topic.md, topic-with-different-type.md)
+      // Total: 11 files
+      expect(docs.length).toBe(11);
+    });
+
+    it('parses documents with correct metadata', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+
+      // Check a specific document has expected fields
+      const experienceDoc = docs.find((d) =>
+        d.path.includes('/experiences/test-experience.md')
+      );
+
+      expect(experienceDoc).toBeDefined();
+      expect(experienceDoc!.slug).toBe('test-experience');
+      expect(experienceDoc!.title).toBe('Test Experience');
+      expect(experienceDoc!.description).toBe('A test experience note');
+      expect(experienceDoc!.topics).toEqual(['testing']);
+      expect(experienceDoc!.status).toBe('completed');
+      expect(experienceDoc!.date).toBe('2025-01-01');
+    });
+
+    it('all documents have required fields', async () => {
+      const docs = await parseVaultDirectory(vaultFixtureDir);
+
+      for (const doc of docs) {
+        expect(doc.path).toBeDefined();
+        expect(doc.slug).toBeDefined();
+        expect(doc.noteType).toBeDefined();
+        expect(doc.title).toBeDefined();
+        expect(doc.bodySections).toBeDefined();
+        expect(doc.rawBody).toBeDefined();
+      }
     });
   });
 });
