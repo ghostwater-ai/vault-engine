@@ -67,6 +67,93 @@ export function tokenize(text: string): string[] {
 }
 
 /**
+ * Computes the fraction of context keywords that appear in a document.
+ *
+ * @param doc - The VaultDocument to check
+ * @param contextTerms - Set of stemmed context terms
+ * @returns Fraction of context terms found in the document (0 to 1)
+ */
+function computeContextOverlap(doc: import('./types.js').VaultDocument, contextTerms: Set<string>): number {
+  if (contextTerms.size === 0) return 0;
+
+  // Tokenize the document content
+  const docText = [
+    doc.title,
+    doc.description ?? '',
+    doc.topics?.join(' ') ?? '',
+    doc.rawBody,
+  ].join(' ');
+
+  const docTerms = new Set(tokenize(docText));
+
+  // Count how many context terms appear in the document
+  let matches = 0;
+  for (const term of contextTerms) {
+    if (docTerms.has(term)) {
+      matches++;
+    }
+  }
+
+  return matches / contextTerms.size;
+}
+
+/**
+ * Threshold for determining if two scores are "similar" for context re-ranking.
+ * Results within this score difference are considered similar and can be
+ * re-ordered by context relevance without violating BM25 primacy.
+ */
+const SIMILARITY_THRESHOLD = 0.05;
+
+/**
+ * Re-ranks results by context overlap as a tiebreaker for similarly-scored results.
+ *
+ * This preserves BM25 primacy: results with significantly different scores
+ * maintain their relative order. Only results within SIMILARITY_THRESHOLD
+ * of each other can be re-ordered by context relevance.
+ *
+ * @param results - Array of scored documents to re-rank
+ * @param contextTerms - Set of stemmed context terms
+ * @returns Re-ranked results with contextOverlap populated
+ */
+function reRankByContext(
+  results: ScoredDocument[],
+  contextTerms: Set<string>
+): ScoredDocument[] {
+  if (results.length === 0 || contextTerms.size === 0) {
+    return results;
+  }
+
+  // First, compute contextOverlap for all results
+  const resultsWithOverlap = results.map((r) => ({
+    ...r,
+    contextOverlap: computeContextOverlap(r.doc, contextTerms),
+  }));
+
+  // Sort with a stable algorithm that preserves BM25 primacy:
+  // - Results with significantly different scores maintain score order
+  // - Results with similar scores (within SIMILARITY_THRESHOLD) are ordered by contextOverlap
+  resultsWithOverlap.sort((a, b) => {
+    const scoreDiff = b.score - a.score;
+
+    // If scores are significantly different, sort by score (BM25 primacy)
+    if (Math.abs(scoreDiff) > SIMILARITY_THRESHOLD) {
+      return scoreDiff;
+    }
+
+    // Scores are similar - use context overlap as tiebreaker
+    const overlapDiff = (b.contextOverlap ?? 0) - (a.contextOverlap ?? 0);
+    if (overlapDiff !== 0) {
+      return overlapDiff;
+    }
+
+    // If overlap is also equal, maintain score order
+    return scoreDiff;
+  });
+
+  return resultsWithOverlap;
+}
+
+/**
  * Queries the vault index and returns ranked results.
  *
  * Pipeline:
@@ -76,7 +163,8 @@ export function tokenize(text: string): string[] {
  * 4. Apply BM25 floor filter (default 0.10)
  * 5. Compute compound score per result (multiplicative formula)
  * 6. Apply compound score threshold (default 0.30)
- * 7. Sort by final score and return top N (default 3)
+ * 7. If context provided, post-hoc re-rank by context term overlap
+ * 8. Sort by final score and return top N (default 3)
  *
  * @param index - The VaultIndex to search
  * @param text - The query text
@@ -104,6 +192,7 @@ export function query(
     minScore,
     minBm25Score,
     noteTypes,
+    context,
   } = mergedOptions;
 
   // Get scoring config
@@ -146,16 +235,40 @@ export function query(
     (r) => r.score >= (minScore ?? DEFAULT_QUERY_OPTIONS.minScore)
   );
 
-  // Step 7: Sort by score (descending) and take top N
+  // Sort by score (descending) before context re-ranking or final selection
   thresholdedResults.sort((a, b) => b.score - a.score);
-  const topResults = thresholdedResults.slice(0, maxResults ?? DEFAULT_QUERY_OPTIONS.maxResults);
+
+  // Step 7: Context re-ranking (if context provided)
+  let contextTerms: string[] | undefined;
+  let finalResults: ScoredDocument[];
+
+  if (context && context.trim()) {
+    // Tokenize context using same processTerm pipeline
+    const terms = tokenize(context);
+    contextTerms = terms;
+    const contextTermSet = new Set(terms);
+
+    // Re-rank by context overlap (tiebreaker only)
+    const reranked = reRankByContext(thresholdedResults, contextTermSet);
+    finalResults = reranked.slice(0, maxResults ?? DEFAULT_QUERY_OPTIONS.maxResults);
+  } else {
+    // No context - just take top N
+    finalResults = thresholdedResults.slice(0, maxResults ?? DEFAULT_QUERY_OPTIONS.maxResults);
+  }
 
   const endTime = performance.now();
 
-  return {
-    results: topResults,
+  const result: QueryResult = {
+    results: finalResults,
     tier: 0, // Always Tier 0 for MVP
     latencyMs: endTime - startTime,
     query: text,
   };
+
+  // Include contextTerms only when context was provided
+  if (contextTerms !== undefined) {
+    result.contextTerms = contextTerms;
+  }
+
+  return result;
 }
