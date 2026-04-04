@@ -9,6 +9,9 @@ export {
 export { VaultWatcher } from './watcher.js';
 export {
   DEFAULT_SCORING_CONFIG,
+  computeScore,
+  normalizeBm25,
   type ScoringConfig,
   type ScoredDocument,
+  type ComputeScoreOptions,
 } from './scoring.js';

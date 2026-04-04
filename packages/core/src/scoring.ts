@@ -150,3 +150,131 @@ export interface ScoredDocument {
    */
   explanation: string;
 }
+
+/**
+ * Options for computeScore function.
+ */
+export interface ComputeScoreOptions {
+  /** Fields that matched the query */
+  matchedFields?: string[];
+}
+
+/**
+ * Normalizes a raw BM25 score to the range [0, 1).
+ *
+ * Formula: bm25_normalized = raw / (1 + raw)
+ *
+ * This transforms unbounded BM25 scores into a bounded range
+ * while preserving relative ordering.
+ */
+export function normalizeBm25(raw: number): number {
+  return raw / (1 + raw);
+}
+
+/**
+ * Formats a number with explicit sign prefix.
+ * @param value - The number to format
+ * @returns String with +/- prefix and 2 decimal places
+ */
+function formatSignedNumber(value: number): string {
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}`;
+}
+
+/**
+ * Gets the modifier label for explanation based on note type.
+ */
+function getModifierLabel(noteType: NoteType): string {
+  switch (noteType) {
+    case 'belief':
+      return 'confidence';
+    case 'research':
+      return 'status';
+    default:
+      return 'modifier';
+  }
+}
+
+/**
+ * Computes the compound score for a vault document.
+ *
+ * This is a pure, stateless function that applies BM25 normalization
+ * and multiplicative compound scoring based on note type and
+ * epistemic quality indicators.
+ *
+ * Formula: compound = bm25_normalized × (1 + type_boost + confidence_modifier)
+ *
+ * @param doc - The vault document to score
+ * @param bm25Raw - Raw BM25 score from search
+ * @param config - Optional scoring configuration (defaults to DEFAULT_SCORING_CONFIG)
+ * @param options - Optional additional options (matchedFields, etc.)
+ * @returns ScoredDocument with breakdown, or null if below BM25 floor
+ */
+export function computeScore(
+  doc: VaultDocument,
+  bm25Raw: number,
+  config: ScoringConfig = DEFAULT_SCORING_CONFIG,
+  options: ComputeScoreOptions = {}
+): ScoredDocument | null {
+  // Normalize BM25 score
+  const bm25Normalized = normalizeBm25(bm25Raw);
+
+  // Apply BM25 floor filter
+  if (bm25Normalized < config.bm25Floor) {
+    return null;
+  }
+
+  // Get type boost (default to 0 for unknown types)
+  const typeBoost = config.typeBoosts[doc.noteType] ?? 0;
+
+  // Compute confidence/status/maturity modifier based on note type
+  let confidenceModifier = 0;
+
+  if (doc.noteType === 'belief') {
+    // For beliefs: confidence + maturity modifiers (cumulative)
+    const confidenceKey = doc.confidence as
+      | keyof ScoringConfig['confidenceModifiers']
+      | undefined;
+    if (confidenceKey && confidenceKey in config.confidenceModifiers) {
+      confidenceModifier += config.confidenceModifiers[confidenceKey];
+    }
+
+    const maturityKey = doc.maturity as
+      | keyof ScoringConfig['maturityModifiers']
+      | undefined;
+    if (maturityKey && maturityKey in config.maturityModifiers) {
+      confidenceModifier += config.maturityModifiers[maturityKey];
+    }
+  } else if (doc.noteType === 'research') {
+    // For research: status modifier
+    const statusKey = doc.status as
+      | keyof ScoringConfig['statusModifiers']
+      | undefined;
+    if (statusKey && statusKey in config.statusModifiers) {
+      confidenceModifier = config.statusModifiers[statusKey];
+    }
+  }
+  // For other note types, confidenceModifier stays at 0
+
+  // Compute compound score
+  const multiplier = 1 + typeBoost + confidenceModifier;
+  const score = bm25Normalized * multiplier;
+
+  // Build explanation string
+  const modifierLabel = getModifierLabel(doc.noteType);
+  const explanation =
+    `BM25: ${bm25Normalized.toFixed(2)} (raw: ${bm25Raw.toFixed(2)}) × ` +
+    `(1 + type:${formatSignedNumber(typeBoost)} + ${modifierLabel}:${formatSignedNumber(confidenceModifier)}) = ` +
+    `${score.toFixed(3)}`;
+
+  return {
+    doc,
+    score,
+    bm25Raw,
+    bm25Normalized,
+    typeBoost,
+    confidenceModifier,
+    matchedFields: options.matchedFields ?? [],
+    explanation,
+  };
+}
