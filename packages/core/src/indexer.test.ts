@@ -38,7 +38,7 @@ describe('VaultIndex', () => {
     it('creates an empty index', () => {
       const stats = index.getStats();
       expect(stats.documentCount).toBe(0);
-      expect(stats.lastBuildTime).toBeNull();
+      expect(stats.lastBuildTime).toBe('');
     });
   });
 
@@ -410,11 +410,23 @@ describe('VaultIndex', () => {
       expect(stats.indexSizeBytes).toBeGreaterThan(0);
     });
 
-    it('returns null lastBuildTime when not built from vault', () => {
+    it('returns empty string lastBuildTime when not built from vault', () => {
       index.addDocument(createTestDocument({ path: '/test/doc1.md' }));
 
       const stats = index.getStats();
-      expect(stats.lastBuildTime).toBeNull();
+      expect(stats.lastBuildTime).toBe('');
+    });
+
+    it('returns ISO timestamp string for lastBuildTime', async () => {
+      await index.buildIndex(vaultFixtureDir);
+
+      const stats = index.getStats();
+      expect(stats.lastBuildTime).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+      );
+      // Verify it can be parsed as a valid date
+      const parsedDate = new Date(stats.lastBuildTime);
+      expect(parsedDate.getTime()).not.toBeNaN();
     });
   });
 
@@ -457,13 +469,10 @@ describe('VaultIndex', () => {
       const after = new Date();
 
       const stats = index.getStats();
-      expect(stats.lastBuildTime).not.toBeNull();
-      expect(stats.lastBuildTime!.getTime()).toBeGreaterThanOrEqual(
-        before.getTime()
-      );
-      expect(stats.lastBuildTime!.getTime()).toBeLessThanOrEqual(
-        after.getTime()
-      );
+      expect(stats.lastBuildTime).not.toBe('');
+      const buildTime = new Date(stats.lastBuildTime);
+      expect(buildTime.getTime()).toBeGreaterThanOrEqual(before.getTime());
+      expect(buildTime.getTime()).toBeLessThanOrEqual(after.getTime());
     });
 
     it('clears existing index before building', async () => {
@@ -513,7 +522,17 @@ describe('rebuildIndex', () => {
 
     expect(index).toBeInstanceOf(VaultIndex);
     expect(index.getStats().documentCount).toBe(11);
-    expect(index.getStats().lastBuildTime).not.toBeNull();
+    expect(index.getStats().lastBuildTime).not.toBe('');
+  });
+
+  it('returns VaultIndex with ISO timestamp lastBuildTime', async () => {
+    const index = await rebuildIndex(vaultFixtureDir);
+
+    const stats = index.getStats();
+    // Verify it's a valid ISO timestamp
+    expect(stats.lastBuildTime).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+    );
   });
 
   it('returns searchable index', async () => {

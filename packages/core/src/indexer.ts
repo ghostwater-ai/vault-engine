@@ -97,8 +97,8 @@ export interface IndexStats {
   typeDistribution: Record<NoteType, number>;
   /** Approximate size of the index in bytes */
   indexSizeBytes: number;
-  /** Timestamp of the last index build */
-  lastBuildTime: Date | null;
+  /** ISO timestamp of the last full index build, or empty string if not built */
+  lastBuildTime: string;
 }
 
 /**
@@ -128,7 +128,7 @@ export interface VaultSearchResult extends SearchResult {
 export class VaultIndex {
   private miniSearch: MiniSearch<IndexedDocument>;
   private documents: Map<string, VaultDocument>;
-  private lastBuildTime: Date | null = null;
+  private lastBuildTime: string = '';
 
   constructor() {
     this.documents = new Map();
@@ -261,7 +261,7 @@ export class VaultIndex {
       typeDistribution,
       indexSizeBytes,
       lastBuildTime: this.lastBuildTime,
-    };
+    } satisfies IndexStats;
   }
 
   /**
@@ -270,7 +270,7 @@ export class VaultIndex {
   clear(): void {
     this.miniSearch.removeAll();
     this.documents.clear();
-    this.lastBuildTime = null;
+    this.lastBuildTime = '';
   }
 
   /**
@@ -293,7 +293,7 @@ export class VaultIndex {
       this.miniSearch.add(this.toIndexedDocument(doc));
     }
 
-    this.lastBuildTime = new Date();
+    this.lastBuildTime = new Date().toISOString();
 
     return docs.length;
   }
