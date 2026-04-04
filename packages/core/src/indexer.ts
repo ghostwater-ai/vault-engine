@@ -249,12 +249,17 @@ export class VaultIndex {
       typeDistribution[doc.noteType]++;
     }
 
-    // Estimate index size - rough approximation based on document count and average doc size
-    const avgDocSize = 2000; // bytes per document estimate
-    const indexOverhead = 1.5; // MiniSearch index overhead multiplier
-    const indexSizeBytes = Math.round(
-      this.documents.size * avgDocSize * indexOverhead
-    );
+    // Estimate index size by serializing the MiniSearch index to JSON
+    // This provides a rough approximation of actual memory usage
+    let indexSizeBytes: number;
+    try {
+      indexSizeBytes = JSON.stringify(this.miniSearch).length;
+    } catch {
+      // Fallback to rough estimate if serialization fails
+      const avgDocSize = 2000;
+      const indexOverhead = 1.5;
+      indexSizeBytes = Math.round(this.documents.size * avgDocSize * indexOverhead);
+    }
 
     return {
       documentCount: this.documents.size,

@@ -169,6 +169,7 @@ export class VaultWatcher {
 
   /**
    * Processes all pending changes in a single batch.
+   * Each change is processed independently - if one fails, others continue.
    */
   private async processPendingChanges(): Promise<void> {
     // Get all pending changes and clear the queue
@@ -176,9 +177,13 @@ export class VaultWatcher {
     this.pendingChanges.clear();
     this.debounceTimer = null;
 
-    // Process each change
+    // Process each change independently - catch errors to ensure all changes are attempted
     for (const change of changes) {
-      await this.processChange(change);
+      try {
+        await this.processChange(change);
+      } catch {
+        // Continue processing remaining changes even if one fails
+      }
     }
   }
 
@@ -203,20 +208,29 @@ export class VaultWatcher {
       }
 
       case 'change': {
-        // Remove old version and add new version
+        // Parse the new file first - only update index if parsing succeeds
+        // This ensures we don't lose the old document on parse failure
         const doc = await parseFile(path);
         if (doc) {
-          try {
-            this.index.removeDocument(path);
-          } catch {
-            // Document might not exist yet
-          }
-          try {
-            this.index.addDocument(doc);
-          } catch {
-            // Handle edge cases
+          // Check if document exists in index
+          const existingDoc = this.index.getDocument(path);
+          if (existingDoc) {
+            // Use updateDocument for atomic remove+add
+            try {
+              this.index.updateDocument(doc);
+            } catch {
+              // Handle edge cases
+            }
+          } else {
+            // Document doesn't exist yet, add it
+            try {
+              this.index.addDocument(doc);
+            } catch {
+              // Document might already exist if watcher fired multiple times
+            }
           }
         }
+        // If parsing fails (doc is null), retain the original document in index
         break;
       }
 
