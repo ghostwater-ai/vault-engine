@@ -26,6 +26,16 @@ importers:
       gray-matter:
         specifier: ^4.0.3
         version: 4.0.3
+      minisearch:
+        specifier: ^7.2.0
+        version: 7.2.0
+      stemmer:
+        specifier: ^2.0.1
+        version: 2.0.1
+    devDependencies:
+      '@types/stemmer':
+        specifier: ^2.0.0
+        version: 2.0.0
 
   packages/openclaw-plugin:
     dependencies:
@@ -193,6 +203,10 @@ packages:
 
   '@types/node@22.19.17':
     resolution: {integrity: sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q==}
+
+  '@types/stemmer@2.0.0':
+    resolution: {integrity: sha512-OSRg3/3FaSOvE0OqWgLlUtBLygqbqjb5ByRF7osVsD1taVsTIwoDD1pkadBDTS3c3FShzveKVoGEDzO0j63Hfw==}
+    deprecated: This is a stub types definition. stemmer provides its own type definitions, so you do not need this installed.
 
   '@vitest/coverage-v8@4.1.2':
     resolution: {integrity: sha512-sPK//PHO+kAkScb8XITeB1bf7fsk85Km7+rt4eeuRR3VS1/crD47cmV5wicisJmjNdfeokTZwjMk4Mj2d58Mgg==}
@@ -404,6 +418,9 @@ packages:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
 
+  minisearch@7.2.0:
+    resolution: {integrity: sha512-dqT2XBYUOZOiC5t2HRnwADjhNS2cecp9u+TJRiJ1Qp/f5qjkeT5APcGPjHw+bz89Ms8Jp+cG4AlE+QZ/QnDglg==}
+
   nanoid@3.3.11:
     resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -455,6 +472,10 @@ packages:
 
   std-env@4.0.0:
     resolution: {integrity: sha512-zUMPtQ/HBY3/50VbpkupYHbRroTRZJPRLvreamgErJVys0ceuzMkD44J/QjqhHjOzK42GQ3QZIeFG1OYfOtKqQ==}
+
+  stemmer@2.0.1:
+    resolution: {integrity: sha512-bkWvSX2JR4nSZFfs113kd4C6X13bBBrg4fBKv2pVdzpdQI2LA5pZcWzTFNdkYsiUNl13E4EzymSRjZ0D55jBYg==}
+    hasBin: true
 
   strip-bom-string@1.0.0:
     resolution: {integrity: sha512-uCC2VHvQRYu+lMh4My/sFNmF2klFymLX1wHJeXnbEJERpV/ZsVuonzerjfrGpIGF7LBVa1O7i9kjiWvJiFck8g==}
@@ -696,6 +717,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/stemmer@2.0.0':
+    dependencies:
+      stemmer: 2.0.1
+
   '@vitest/coverage-v8@4.1.2(vitest@4.1.2(@types/node@22.19.17)(vite@8.0.3(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@22.19.17)))':
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
@@ -888,6 +913,8 @@ snapshots:
     dependencies:
       semver: 7.7.4
 
+  minisearch@7.2.0: {}
+
   nanoid@3.3.11: {}
 
   obug@2.1.1: {}
@@ -944,6 +971,8 @@ snapshots:
   stackback@0.0.2: {}
 
   std-env@4.0.0: {}
+
+  stemmer@2.0.1: {}
 
   strip-bom-string@1.0.0: {}
 
