@@ -1,53 +1,302 @@
 #!/usr/bin/env node
 
-/**
- * Vault Engine CLI
- *
- * A retrieval engine for structured Markdown knowledge vaults
- * using BM25 + epistemic scoring.
- */
-
-const HELP_TEXT = `
-vault - Retrieval engine for structured Markdown knowledge vaults
-
-USAGE:
-  vault <command> [options]
-
-COMMANDS:
-  query <text>        Search the vault for relevant documents
-  index rebuild       Force a full reindex of the vault
-  index stats         Show index statistics
-
-OPTIONS:
-  --vault-path <path> Path to the vault directory
-  --help, -h          Show this help message
-  --version, -v       Show version information
-
-EXAMPLES:
-  vault query "what do we think about memory systems?"
-  vault query --explain "retrieval architecture"
-  vault index stats
-
-For more information, visit: https://github.com/ghostwater-ai/vault-engine
-`.trim();
+import { Command, InvalidArgumentError } from "commander";
+import { resolve } from "node:path";
+import process from "node:process";
+import {
+  DEFAULT_QUERY_OPTIONS,
+  rebuildIndex,
+  query,
+} from "@ghostwater/vault-engine";
+import type { NoteType } from "@ghostwater/vault-engine";
 
 const VERSION = "0.1.0";
+const DRY_RUN_TOTAL_TOKEN_BUDGET = 1500;
+const DRY_RUN_PER_RESULT_TOKEN_BUDGET = 400;
+const AVG_CHARS_PER_TOKEN = 4;
+const VALID_NOTE_TYPES = [
+  "experience",
+  "research",
+  "belief",
+  "entity",
+  "bet",
+  "question",
+  "topic",
+] as const;
 
-function main(): void {
-  const args = process.argv.slice(2);
-
-  if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
-    console.log(HELP_TEXT);
-    process.exit(0);
-  }
-
-  if (args.includes("--version") || args.includes("-v")) {
-    console.log(`vault ${VERSION}`);
-    process.exit(0);
-  }
-
-  // Stub: actual command handling will be implemented in future stories
-  console.log(HELP_TEXT);
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / AVG_CHARS_PER_TOKEN);
 }
 
-main();
+function parsePositiveInteger(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new InvalidArgumentError(`Expected a positive integer, received: ${value}`);
+  }
+  return parsed;
+}
+
+function parseScore(value: string): number {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new InvalidArgumentError(`Expected a score between 0 and 1, received: ${value}`);
+  }
+  return parsed;
+}
+
+function normalizeNoteType(rawType: string): string | null {
+  const normalized = rawType.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const singular = normalized.endsWith("s") ? normalized.slice(0, -1) : normalized;
+  if (VALID_NOTE_TYPES.includes(singular as (typeof VALID_NOTE_TYPES)[number])) {
+    return singular;
+  }
+
+  return null;
+}
+
+function parseTypes(value: string): string[] {
+  const parts = value.split(",");
+  const parsed = new Set<string>();
+
+  for (const part of parts) {
+    const normalized = normalizeNoteType(part);
+    if (!normalized) {
+      throw new InvalidArgumentError(
+        `Invalid note type: ${part.trim() || "(empty)"}. Valid types: ${VALID_NOTE_TYPES.join(", ")}`
+      );
+    }
+    parsed.add(normalized);
+  }
+
+  return Array.from(parsed);
+}
+
+function resolveVaultPath(vaultPathOverride: string | undefined): string {
+  const selectedPath = vaultPathOverride ?? process.env.VAULT_PATH;
+  if (!selectedPath) {
+    throw new Error(
+      "Vault path is required. Provide --vault-path <path> or set VAULT_PATH in your environment."
+    );
+  }
+
+  return resolve(selectedPath);
+}
+
+function formatResultLine(result: (Awaited<ReturnType<typeof query>>) ["results"][number]): string {
+  const status = result.doc.status ?? "unknown";
+  const description = result.doc.description ? ` — ${result.doc.description}` : "";
+  return `${result.score.toFixed(3)}  [${result.doc.noteType}|${status}] ${result.doc.title}${description}`;
+}
+
+function clampToTokenBudget(text: string, tokenBudget: number): string {
+  if (estimateTokens(text) <= tokenBudget) {
+    return text;
+  }
+
+  const maxChars = Math.max(0, tokenBudget * AVG_CHARS_PER_TOKEN - 3);
+  return `${text.slice(0, maxChars).trimEnd()}...`;
+}
+
+function renderDryRun(results: (Awaited<ReturnType<typeof query>>) ["results"]): string {
+  const blocks: string[] = [];
+  let usedTokens = estimateTokens("## Vault Context\n");
+
+  for (const result of results) {
+    const status = result.doc.status ?? "unknown";
+    const header = `[${result.doc.noteType}|${status}] ${result.doc.title}`;
+    const rawDescription = result.doc.description ?? "";
+
+    const maxDescriptionTokens = Math.max(
+      0,
+      DRY_RUN_PER_RESULT_TOKEN_BUDGET - estimateTokens(`${header}\n`)
+    );
+    const description = clampToTokenBudget(rawDescription, maxDescriptionTokens);
+    const block = description ? `${header}\n${description}` : header;
+
+    const blockTokens = estimateTokens(block);
+    if (blockTokens > DRY_RUN_PER_RESULT_TOKEN_BUDGET) {
+      continue;
+    }
+
+    if (usedTokens + blockTokens > DRY_RUN_TOTAL_TOKEN_BUDGET) {
+      continue;
+    }
+
+    blocks.push(block);
+    usedTokens += blockTokens;
+  }
+
+  const lines = ["## Vault Context", "", ...blocks.flatMap((block) => [block, ""])];
+  lines.push(
+    `Token estimate: ${usedTokens}/${DRY_RUN_TOTAL_TOKEN_BUDGET} (heuristic: ~1 token per ${AVG_CHARS_PER_TOKEN} chars)`
+  );
+  return lines.join("\n").trimEnd();
+}
+
+function renderExplainOutput(
+  queryText: string,
+  result: Awaited<ReturnType<typeof query>>,
+  minScore: number,
+  minBm25Score: number
+): string {
+  const lines: string[] = [];
+
+  lines.push(`Query: ${queryText}`);
+  lines.push(`Tier: ${result.tier}`);
+  lines.push(`Latency: ${result.latencyMs.toFixed(2)}ms`);
+  if (result.contextTerms && result.contextTerms.length > 0) {
+    lines.push(`Context terms: ${result.contextTerms.join(", ")}`);
+  }
+  lines.push("");
+
+  if (result.results.length === 0) {
+    lines.push("No results passed threshold filters.");
+    lines.push(`BM25 floor threshold: ${minBm25Score.toFixed(2)}`);
+    lines.push(`Compound threshold: ${minScore.toFixed(2)}`);
+    return lines.join("\n");
+  }
+
+  for (const [index, scored] of result.results.entries()) {
+    lines.push(`${index + 1}. [${scored.doc.noteType}|${scored.doc.status ?? "unknown"}] ${scored.doc.title}`);
+    lines.push(`   raw BM25: ${scored.bm25Raw.toFixed(4)}`);
+    lines.push(`   normalized BM25: ${scored.bm25Normalized.toFixed(4)}`);
+    lines.push(`   type boost: ${scored.typeBoost.toFixed(4)}`);
+    lines.push(`   confidence modifier: ${scored.confidenceModifier.toFixed(4)}`);
+    lines.push(`   context overlap: ${(scored.contextOverlap ?? 0).toFixed(4)}`);
+    lines.push(`   BM25 floor status: passed (${scored.bm25Normalized.toFixed(4)} >= ${minBm25Score.toFixed(4)})`);
+    lines.push(`   compound threshold status: passed (${scored.score.toFixed(4)} >= ${minScore.toFixed(4)})`);
+    lines.push(`   final score: ${scored.score.toFixed(4)}`);
+    lines.push(`   explanation: ${scored.explanation}`);
+    lines.push("");
+  }
+
+  return lines.join("\n").trimEnd();
+}
+
+async function handleQuery(
+  text: string,
+  queryOptions: {
+    json?: boolean;
+    explain?: boolean;
+    context?: string;
+    types?: string[];
+    maxResults?: number;
+    minScore?: number;
+    dryRun?: boolean;
+  },
+  command: Command
+): Promise<void> {
+  const globalOptions = command.parent?.opts<{ vaultPath?: string }>() ?? {};
+  const opts = {
+    ...queryOptions,
+    ...globalOptions,
+  } as {
+    vaultPath?: string;
+    json?: boolean;
+    explain?: boolean;
+    context?: string;
+    types?: string[];
+    maxResults?: number;
+    minScore?: number;
+    dryRun?: boolean;
+  };
+
+  const vaultPath = resolveVaultPath(opts.vaultPath);
+  const index = await rebuildIndex(vaultPath);
+
+  const minScore = opts.minScore ?? DEFAULT_QUERY_OPTIONS.minScore;
+  const minBm25Score = DEFAULT_QUERY_OPTIONS.minBm25Score;
+
+  const result = query(index, text, {
+    context: opts.context,
+    maxResults: opts.maxResults,
+    minScore: opts.minScore,
+    noteTypes: opts.types as NoteType[] | undefined,
+    minBm25Score,
+  });
+
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (opts.explain) {
+    console.log(renderExplainOutput(text, result, minScore, minBm25Score));
+    return;
+  }
+
+  if (opts.dryRun) {
+    console.log(renderDryRun(result.results));
+    return;
+  }
+
+  console.log(`Query: ${result.query}`);
+  console.log(`Tier: ${result.tier}`);
+  console.log(`Latency: ${result.latencyMs.toFixed(2)}ms`);
+  if (result.contextTerms && result.contextTerms.length > 0) {
+    console.log(`Context terms: ${result.contextTerms.join(", ")}`);
+  }
+  console.log("");
+
+  if (result.results.length === 0) {
+    console.log("No results found.");
+    return;
+  }
+
+  for (const scored of result.results) {
+    console.log(formatResultLine(scored));
+  }
+}
+
+async function main(): Promise<void> {
+  const program = new Command();
+
+  program
+    .name("vault")
+    .description("Retrieval engine for structured Markdown knowledge vaults")
+    .version(VERSION)
+    .option("--vault-path <path>", "Path to the vault directory (or use VAULT_PATH)");
+
+  program
+    .command("query")
+    .argument("<text>", "Search query text")
+    .description("Search the vault for relevant documents")
+    .option("--json", "Print raw structured JSON output")
+    .option("--explain", "Print full scoring breakdown")
+    .option("--context <text>", "Context string for tie-break reranking")
+    .option("--types <types>", "Comma-separated note types", parseTypes)
+    .option("--max-results <count>", "Maximum number of results", parsePositiveInteger)
+    .option("--min-score <score>", "Minimum compound threshold (0..1)", parseScore)
+    .option("--dry-run", "Render OpenClaw-style injection preview")
+    .action((text, options, command) => handleQuery(text, options, command));
+
+  const indexCommand = program.command("index").description("Index management commands");
+
+  indexCommand
+    .command("rebuild")
+    .description("Force a full reindex of the vault")
+    .action(() => {
+      console.error("index rebuild is not part of STORY-1 scope.");
+      process.exitCode = 1;
+    });
+
+  indexCommand
+    .command("stats")
+    .description("Show index statistics")
+    .action(() => {
+      console.error("index stats is not part of STORY-1 scope.");
+      process.exitCode = 1;
+    });
+
+  try {
+    await program.parseAsync(process.argv);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Error: ${message}`);
+    process.exitCode = 1;
+  }
+}
+
+void main();
