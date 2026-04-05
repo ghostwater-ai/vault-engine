@@ -1,11 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { execSync, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..");
-const distBinPath = join(rootDir, "dist", "bin", "vault.js");
+const distBinPath = join(rootDir, "packages", "core", "dist", "bin", "vault.js");
+const corePackageDir = join(rootDir, "packages", "core");
 const fixtureVaultPath = join(
   rootDir,
   "packages",
@@ -211,5 +214,44 @@ describe("vault CLI", () => {
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Vault path is required. Provide --vault-path <path> or set VAULT_PATH in your environment.");
+  });
+
+  it("publishes vault bin from an in-package dist path", () => {
+    const packageJson = JSON.parse(
+      readFileSync(join(corePackageDir, "package.json"), "utf-8")
+    ) as { bin?: { vault?: string } };
+    const vaultBinPath = packageJson.bin?.vault;
+
+    expect(vaultBinPath).toBe("./dist/bin/vault.js");
+
+    const packDir = mkdtempSync(join(tmpdir(), "vault-engine-pack-"));
+
+    try {
+      execSync(`pnpm pack --pack-destination "${packDir}"`, {
+        cwd: corePackageDir,
+        encoding: "utf-8",
+      });
+
+      const tarballName = readdirSync(packDir).find((name) => name.endsWith(".tgz"));
+      expect(tarballName).toBeTruthy();
+
+      const tarballPath = join(packDir, tarballName ?? "");
+      const tarContents = execSync(`tar -tzf "${tarballPath}"`, {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      expect(tarContents).toContain("package/dist/bin/vault.js");
+
+      const packedPackageJson = JSON.parse(
+        execSync(`tar -xOf "${tarballPath}" package/package.json`, {
+          cwd: rootDir,
+          encoding: "utf-8",
+        })
+      ) as { bin?: { vault?: string } };
+
+      expect(packedPackageJson.bin?.vault).toBe("./dist/bin/vault.js");
+    } finally {
+      rmSync(packDir, { recursive: true, force: true });
+    }
   });
 });
