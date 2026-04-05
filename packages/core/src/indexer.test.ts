@@ -403,11 +403,32 @@ describe('VaultIndex', () => {
       expect(stats.typeDistribution.entity).toBe(0);
     });
 
-    it('returns estimated index size', () => {
-      index.addDocument(createTestDocument({ path: '/test/doc1.md' }));
+    it('returns serialized MiniSearch payload byte size for indexSizeBytes', () => {
+      index.addDocument(
+        createTestDocument({
+          path: '/test/doc1.md',
+          title: 'Memory Systems',
+          description: 'A short description',
+          topics: ['memory', 'systems'],
+          rawBody: 'Body text with searchable content.',
+        })
+      );
+      index.addDocument(
+        createTestDocument({
+          path: '/test/doc2.md',
+          noteType: 'research',
+          title: 'Research Notes',
+          rawBody: 'Additional indexable text for deterministic payload.',
+        })
+      );
+
+      const expectedSize = Buffer.byteLength(
+        JSON.stringify((index as any).miniSearch.toJSON()),
+        'utf8'
+      );
 
       const stats = index.getStats();
-      expect(stats.indexSizeBytes).toBeGreaterThan(0);
+      expect(stats.indexSizeBytes).toBe(expectedSize);
     });
 
     it('returns empty string lastBuildTime when not built from vault', () => {
