@@ -121,8 +121,10 @@ describe('integration: Abidan vault retrieval and CLI', () => {
     const result = query(index, 'memory systems');
     assertScoringInvariants(result);
 
-    expect(result.results.some((item) => item.doc.noteType === 'belief' || item.doc.noteType === 'research')).toBe(true);
-    expect(result.results.some((item) => toSearchableText(item.doc).includes('memory'))).toBe(true);
+    const topResult = result.results[0];
+    expect(topResult).toBeDefined();
+    expect(topResult?.doc.noteType === 'belief' || topResult?.doc.noteType === 'research').toBe(true);
+    expect(toSearchableText(topResult?.doc ?? { title: '', path: '' })).toContain('memory');
   });
 
   it('integration: known query "what do we think about retrieval" returns retrieval-focused belief/research results', async (context) => {
@@ -130,8 +132,11 @@ describe('integration: Abidan vault retrieval and CLI', () => {
     const result = query(index, 'what do we think about retrieval');
     assertScoringInvariants(result);
 
-    expect(result.results.some((item) => item.doc.noteType === 'belief' || item.doc.noteType === 'research')).toBe(true);
-    expect(result.results.some((item) => toSearchableText(item.doc).includes('retrieval'))).toBe(true);
+    const topResult = result.results[0];
+    const topThree = result.results.slice(0, 3);
+    expect(topResult).toBeDefined();
+    expect(topResult?.doc.noteType === 'belief' || topResult?.doc.noteType === 'research').toBe(true);
+    expect(topThree.some((item) => toSearchableText(item.doc).includes('retrieval'))).toBe(true);
   });
 
   it('integration: known query "byterover" returns ByteRover research result', async (context) => {
@@ -139,8 +144,10 @@ describe('integration: Abidan vault retrieval and CLI', () => {
     const result = query(index, 'byterover');
     assertScoringInvariants(result);
 
-    expect(result.results.some((item) => item.doc.noteType === 'research')).toBe(true);
-    expect(result.results.some((item) => toSearchableText(item.doc).includes('byterover'))).toBe(true);
+    const topResult = result.results[0];
+    expect(topResult).toBeDefined();
+    expect(topResult?.doc.noteType).toBe('research');
+    expect(toSearchableText(topResult?.doc ?? { title: '', path: '' })).toContain('byterover');
   });
 
   it('integration: known query marketing/GTM surfaces topic page(s)', async (context) => {
@@ -157,12 +164,13 @@ describe('integration: Abidan vault retrieval and CLI', () => {
     }
 
     expect(combined.every((item) => item.doc.noteType === 'topic')).toBe(true);
-    expect(combined.some((item) => /marketing|gtm/i.test(toSearchableText(item.doc)))).toBe(true);
+    expect(toSearchableText(marketing.results[0]?.doc ?? { title: '', path: '' })).toContain('marketing');
+    expect(toSearchableText(gtm.results[0]?.doc ?? { title: '', path: '' })).toContain('gtm');
   });
 
-  it('integration: unrelated query "quantum physics" returns no results', async (context) => {
+  it('integration: unrelated query with default thresholds returns no results', async (context) => {
     const index = await getAbidanIndex(context);
-    const result = query(index, 'quantum physics', { minScore: 1.0 });
+    const result = query(index, 'the and of in to');
     expect(result.results).toHaveLength(0);
   });
 
@@ -177,9 +185,7 @@ describe('integration: Abidan vault retrieval and CLI', () => {
     expect(estimateTokens(formatted ?? '')).toBeLessThanOrEqual(TOKEN_BUDGET);
   });
 
-  it('integration: deterministic ordering keeps belief above experience for controlled near-tie BM25 matches', async (context) => {
-    await skipIfNoAbidanVault(context);
-
+  it('integration: deterministic ordering keeps belief above experience for controlled near-tie BM25 matches', async () => {
     const tempVault = await mkdtemp(join(tmpdir(), 'vault-engine-integration-'));
     await mkdir(join(tempVault, 'beliefs'), { recursive: true });
     await mkdir(join(tempVault, 'experiences'), { recursive: true });
