@@ -188,7 +188,11 @@ export class VaultWatcher {
     for (const change of changes) {
       try {
         await this.processChange(change);
-      } catch {
+      } catch (error) {
+        console.warn(
+          `Failed to process watcher change batch item: ${change.path}`,
+          error
+        );
         // Continue processing remaining changes even if one fails
       }
     }
@@ -237,8 +241,13 @@ export class VaultWatcher {
             // Document doesn't exist yet, add it
             try {
               this.index.addDocument(doc);
-            } catch {
-              // Document might already exist if watcher fired multiple times
+            } catch (error) {
+              if (!isDuplicateDocumentError(error)) {
+                console.warn(
+                  `Failed to add document from watcher change: ${path}`,
+                  error
+                );
+              }
             }
           }
         }
