@@ -219,6 +219,14 @@ async function initializeEngine(config: PluginConfig, logger: Logger | undefined
 
   try {
     const index = await rebuildIndex(config.vaultPath);
+    const stats = index.getStats();
+    if (stats.documentCount === 0) {
+      warnOnce(
+        logger,
+        `empty-vault:${config.vaultPath}`,
+        `[vault-engine] no markdown notes were indexed from "${config.vaultPath}". Plugin will stay enabled but inject no context until notes are available.`
+      );
+    }
     engineState = { status: 'ready', index };
   } catch (error) {
     engineState = { status: 'disabled', reason: 'engine-init-failed' };

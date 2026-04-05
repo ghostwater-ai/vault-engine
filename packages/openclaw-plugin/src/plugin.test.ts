@@ -48,6 +48,12 @@ function createQueryResult(overrides?: Partial<QueryResult>): QueryResult {
   };
 }
 
+function createMockIndex(documentCount = 1): { getStats: () => { documentCount: number } } {
+  return {
+    getStats: () => ({ documentCount }),
+  };
+}
+
 describe('openclaw plugin runtime', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
@@ -88,7 +94,7 @@ describe('openclaw plugin runtime', () => {
     await expect(hook({ config, messages })).resolves.toBeUndefined();
     await vi.waitFor(() => expect(rebuildIndexMock).toHaveBeenCalledTimes(1));
 
-    resolveInit?.({ fake: 'index' });
+    resolveInit?.(createMockIndex());
     await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
 
     const result = await hook({ config, messages });
@@ -113,38 +119,46 @@ describe('openclaw plugin runtime', () => {
     expect(logger.warn).toHaveBeenCalledTimes(1);
   });
 
-  it('returns no injection for empty vault and does not crash', async () => {
-    rebuildIndexMock.mockResolvedValue({ fake: 'index' });
+  it('returns no injection for empty vault and logs once', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex(0));
     queryMock.mockReturnValue(createQueryResult({ results: [] }));
 
     const mod = await import('./plugin.js');
     const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
       .before_prompt_build;
 
+    const logger = { warn: vi.fn() };
     const emptyVaultPath = await mkdtemp(join(tmpdir(), 'vault-empty-'));
     try {
       await expect(
         hook({
           config: { vaultPath: emptyVaultPath },
           messages: [{ role: 'user', content: 'test query' }],
+          logger,
         })
       ).resolves.toBeUndefined();
 
       await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('no markdown notes were indexed')
+      );
 
       await expect(
         hook({
           config: { vaultPath: emptyVaultPath },
           messages: [{ role: 'user', content: 'test query' }],
+          logger,
         })
       ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledTimes(1);
     } finally {
       await rm(emptyVaultPath, { recursive: true, force: true });
     }
   });
 
   it('uses latest user message as query and last 3 user messages as context', async () => {
-    rebuildIndexMock.mockResolvedValue({ fake: 'index' });
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
     queryMock.mockReturnValue(createQueryResult());
 
     const mod = await import('./plugin.js');
@@ -172,5 +186,33 @@ describe('openclaw plugin runtime', () => {
         context: 'second user\n\nthird user\n\nfourth user',
       })
     );
+  });
+
+  it('reads config from plugins.entries.vault-engine.config', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
+    queryMock.mockReturnValue(createQueryResult());
+
+    const mod = await import('./plugin.js');
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+
+    const config = {
+      plugins: {
+        entries: {
+          'vault-engine': {
+            config: {
+              vaultPath: '/tmp',
+            },
+          },
+        },
+      },
+    };
+    const messages = [{ role: 'user', content: 'nested config' }];
+
+    await hook({ config, messages });
+    await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
+    await hook({ config, messages });
+
+    expect(rebuildIndexMock).toHaveBeenCalledWith('/tmp');
   });
 });
