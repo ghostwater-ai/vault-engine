@@ -13,15 +13,10 @@
  * @see PRODUCT.md UAC-011, UAC-012, UAC-014
  */
 
-import type { VaultIndex } from './indexer.js';
-import { processTerm } from './indexer.js';
-import {
-  computeScore,
-  type ScoredDocument,
-  type ScoringConfig,
-  DEFAULT_SCORING_CONFIG,
-} from './scoring.js';
-import type { QueryOptions, QueryResult } from './types.js';
+import { processTerm, type VaultIndex } from './indexer.js';
+import { computeScore, DEFAULT_SCORING_CONFIG } from './scoring.js';
+import type { ScoredDocument, ScoringConfig } from './scoring.js';
+import type { QueryOptions, QueryResult, VaultDocument } from './types.js';
 
 /**
  * Default options for the query function.
@@ -73,7 +68,7 @@ export function tokenize(text: string): string[] {
  * @param contextTerms - Set of stemmed context terms
  * @returns Fraction of context terms found in the document (0 to 1)
  */
-function computeContextOverlap(doc: import('./types.js').VaultDocument, contextTerms: Set<string>): number {
+function computeContextOverlap(doc: VaultDocument, contextTerms: Set<string>): number {
   if (contextTerms.size === 0) return 0;
 
   // Tokenize the document content
@@ -172,12 +167,19 @@ function reRankByContext(
  * @param config - Optional retrieval configuration (scoring, defaults)
  * @returns QueryResult with ranked results
  */
-export function query(
+export type QueryFunction = (
   index: VaultIndex,
   text: string,
   options?: QueryOptions,
   config?: RetrievalConfig
-): QueryResult {
+) => QueryResult;
+
+export const query: QueryFunction = (
+  index: VaultIndex,
+  text: string,
+  options?: QueryOptions,
+  config?: RetrievalConfig
+): QueryResult => {
   const startTime = performance.now();
 
   // Merge options with defaults
@@ -245,12 +247,17 @@ export function query(
   if (context && context.trim()) {
     // Tokenize context using same processTerm pipeline
     const terms = tokenize(context);
-    contextTerms = terms;
-    const contextTermSet = new Set(terms);
+    if (terms.length > 0) {
+      contextTerms = terms;
+      const contextTermSet = new Set(terms);
 
-    // Re-rank by context overlap (tiebreaker only)
-    const reranked = reRankByContext(thresholdedResults, contextTermSet);
-    finalResults = reranked.slice(0, maxResults ?? DEFAULT_QUERY_OPTIONS.maxResults);
+      // Re-rank by context overlap (tiebreaker only)
+      const reranked = reRankByContext(thresholdedResults, contextTermSet);
+      finalResults = reranked.slice(0, maxResults ?? DEFAULT_QUERY_OPTIONS.maxResults);
+    } else {
+      // Stopwords-only context normalizes to "no context"
+      finalResults = thresholdedResults.slice(0, maxResults ?? DEFAULT_QUERY_OPTIONS.maxResults);
+    }
   } else {
     // No context - just take top N
     finalResults = thresholdedResults.slice(0, maxResults ?? DEFAULT_QUERY_OPTIONS.maxResults);
@@ -271,4 +278,4 @@ export function query(
   }
 
   return result;
-}
+};

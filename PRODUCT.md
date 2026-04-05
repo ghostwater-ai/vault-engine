@@ -291,7 +291,7 @@ bin/
 - added: 2026-04-04
 - source_files: packages/core/src/retrieval.ts, packages/core/src/types.ts
 - criteria:
-  - Main function: `query(text: string, options?: QueryOptions) → QueryResult`
+  - Main function: `query(index: VaultIndex, text: string, options?: QueryOptions, config?: RetrievalConfig) → QueryResult`
   - `QueryOptions`: `{ maxResults?, minScore?, minBm25Score?, noteTypes?, tokenBudget?, context? }`
   - `QueryResult`: `{ results: ScoredDocument[], tier: number, latencyMs: number, query: string, contextTerms?: string[] }`
   - `ScoredDocument`: `{ doc: VaultDocument, score: number, bm25Raw: number, bm25Normalized: number, typeBoost: number, confidenceModifier: number, contextOverlap?: number, matchedFields: string[], explanation: string }`

@@ -719,6 +719,38 @@ describe('context re-ranking', () => {
       expect(result.contextTerms).not.toContain('is');
       expect(result.contextTerms).not.toContain('in');
     });
+
+    it('stopwords-only context normalizes to no context', () => {
+      index.addDocument(
+        createTestDocument({
+          path: '/test/doc.md',
+          title: 'Memory Systems',
+          noteType: 'research',
+          rawBody: 'Memory systems content.',
+        })
+      );
+
+      const resultNoContext = query(index, 'memory', {
+        minScore: 0,
+        minBm25Score: 0,
+        maxResults: 10,
+      });
+
+      const resultStopwordsContext = query(index, 'memory', {
+        context: 'the and is in',
+        minScore: 0,
+        minBm25Score: 0,
+        maxResults: 10,
+      });
+
+      expect(resultStopwordsContext.contextTerms).toBeUndefined();
+      expect(resultStopwordsContext.results.map((r) => r.doc.path)).toEqual(
+        resultNoContext.results.map((r) => r.doc.path)
+      );
+      for (const r of resultStopwordsContext.results) {
+        expect(r.contextOverlap).toBeUndefined();
+      }
+    });
   });
 
   describe('contextOverlap calculation', () => {

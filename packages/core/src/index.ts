@@ -21,4 +21,5 @@ export {
   tokenize,
   DEFAULT_QUERY_OPTIONS,
   type RetrievalConfig,
+  type QueryFunction,
 } from './retrieval.js';
