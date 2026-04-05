@@ -63,19 +63,17 @@ describe("vault CLI", () => {
     expect(output).toMatch(/\d+\.\d{3}\s+\[[a-z]+\|[^\]]+\]\s+.+\s—\s.+/);
   });
 
-  it("vault query --json prints parseable JSON with query/tier/latencyMs/results", () => {
+  it("vault query --json prints parseable JSON ScoredDocument[] array", () => {
     const output = runCli(`query "test" --vault-path "${fixtureVaultPath}" --json`);
-    const parsed = JSON.parse(output) as {
-      query: string;
-      tier: number;
-      latencyMs: number;
-      results: unknown[];
-    };
+    const parsed = JSON.parse(output) as Array<{
+      score: number;
+      doc: { title: string };
+    }>;
 
-    expect(parsed.query).toBe("test");
-    expect(parsed.tier).toBe(0);
-    expect(typeof parsed.latencyMs).toBe("number");
-    expect(Array.isArray(parsed.results)).toBe(true);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.length).toBeGreaterThan(0);
+    expect(typeof parsed[0]?.score).toBe("number");
+    expect(typeof parsed[0]?.doc?.title).toBe("string");
   });
 
   it("vault query --explain includes scoring breakdown fields and explanation string", () => {
@@ -139,6 +137,11 @@ describe("vault CLI", () => {
       .filter((line) => /^\[[a-z]+\|[^\]]+\]\s.+/.test(line));
 
     expect(headers.length).toBeLessThanOrEqual(3);
+  });
+
+  it("vault query --dry-run emits no output when no results pass thresholds", () => {
+    const output = runCli(`query "zzzznomatch" --vault-path "${fixtureVaultPath}" --dry-run`);
+    expect(output).toBe("");
   });
 
   it("vault query accepts plural entities note type", () => {

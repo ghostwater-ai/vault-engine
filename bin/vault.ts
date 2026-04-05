@@ -161,6 +161,10 @@ function renderDryRun(results: (Awaited<ReturnType<typeof query>>) ["results"]):
     usedTokens += blockTokens;
   }
 
+  if (blocks.length === 0) {
+    return "";
+  }
+
   const lines = ["## Vault Context", "", ...blocks.flatMap((block) => [block, ""])];
   lines.push(
     `Token estimate: ${usedTokens}/${DRY_RUN_TOTAL_TOKEN_BUDGET} (heuristic: ~1 token per ${AVG_CHARS_PER_TOKEN} chars)`
@@ -252,7 +256,7 @@ async function handleQuery(
   });
 
   if (opts.json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result.results, null, 2));
     return;
   }
 
@@ -262,7 +266,10 @@ async function handleQuery(
   }
 
   if (opts.dryRun) {
-    console.log(renderDryRun(result.results));
+    const output = renderDryRun(result.results);
+    if (output) {
+      console.log(output);
+    }
     return;
   }
 
