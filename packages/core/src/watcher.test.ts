@@ -69,6 +69,7 @@ describe('VaultWatcher', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (watcher) {
       await watcher.stop();
     }
@@ -372,6 +373,122 @@ describe('VaultWatcher', () => {
 
       await wait(3000);
       expect(index.getDocument(filePath)).toBeDefined();
+    });
+  });
+
+  describe('error handling', () => {
+    it('continues processing remaining queued changes when one change throws', async () => {
+      watcher = new VaultWatcher(tempDir, index);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const failingPath = join(tempDir, 'experiences', 'failing.md');
+      const successPath = join(tempDir, 'experiences', 'success.md');
+
+      const processChangeSpy = vi
+        .spyOn(watcher as any, 'processChange')
+        .mockImplementation(async (change: { path: string }) => {
+          if (change.path === failingPath) {
+            throw new Error('simulated change failure');
+          }
+
+          index.addDocument({
+            path: successPath,
+            slug: 'success',
+            noteType: 'experience',
+            title: 'Success',
+            bodySections: [],
+            rawBody: 'success body',
+          });
+        });
+
+      (watcher as any).pendingChanges.set(failingPath, {
+        type: 'add',
+        path: failingPath,
+      });
+      (watcher as any).pendingChanges.set(successPath, {
+        type: 'add',
+        path: successPath,
+      });
+
+      await (watcher as any).processPendingChanges();
+
+      expect(processChangeSpy).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain(failingPath);
+      expect(index.getDocument(successPath)?.title).toBe('Success');
+    });
+
+    it('warns on unexpected add-path indexing errors', async () => {
+      watcher = new VaultWatcher(tempDir, index);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const filePath = join(tempDir, 'experiences', 'warn-on-add-error.md');
+      await writeFile(filePath, createMarkdownContent('Warn', 'Body'));
+
+      vi.spyOn(index, 'addDocument').mockImplementation(() => {
+        throw new Error('unexpected add failure');
+      });
+
+      await (watcher as any).processChange({ type: 'add', path: filePath });
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain(filePath);
+    });
+
+    it('tolerates duplicate-document add races without warning', async () => {
+      watcher = new VaultWatcher(tempDir, index);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const filePath = join(tempDir, 'experiences', 'duplicate-race.md');
+      await writeFile(filePath, createMarkdownContent('Duplicate', 'Body'));
+
+      await index.buildIndex(tempDir);
+      expect(index.getDocument(filePath)).toBeDefined();
+
+      await expect(
+        (watcher as any).processChange({ type: 'add', path: filePath })
+      ).resolves.not.toThrow();
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('warns on unexpected change-path addDocument errors', async () => {
+      watcher = new VaultWatcher(tempDir, index);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const filePath = join(tempDir, 'experiences', 'warn-on-change-add.md');
+      await writeFile(filePath, createMarkdownContent('Warn', 'Body'));
+
+      vi.spyOn(index, 'getDocument').mockReturnValue(undefined);
+      vi.spyOn(index, 'addDocument').mockImplementation(() => {
+        throw new Error('unexpected change add failure');
+      });
+
+      await (watcher as any).processChange({ type: 'change', path: filePath });
+
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain(filePath);
+    });
+
+    it('tolerates duplicate-document races in change fallback add without warning', async () => {
+      watcher = new VaultWatcher(tempDir, index);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const filePath = join(
+        tempDir,
+        'experiences',
+        'duplicate-race-change.md'
+      );
+      await writeFile(filePath, createMarkdownContent('Duplicate', 'Body'));
+
+      vi.spyOn(index, 'getDocument').mockReturnValue(undefined);
+      vi.spyOn(index, 'addDocument').mockImplementation(() => {
+        throw new Error(`Document already exists: ${filePath}`);
+      });
+
+      await expect(
+        (watcher as any).processChange({ type: 'change', path: filePath })
+      ).resolves.not.toThrow();
+      expect(warnSpy).not.toHaveBeenCalled();
     });
   });
 });
