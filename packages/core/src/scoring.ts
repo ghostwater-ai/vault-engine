@@ -175,7 +175,8 @@ export interface ComputeScoreOptions {
  * while preserving relative ordering.
  */
 export function normalizeBm25(raw: number): number {
-  return raw / (1 + raw);
+  const safeRaw = Math.max(0, raw);
+  return safeRaw / (1 + safeRaw);
 }
 
 /**
