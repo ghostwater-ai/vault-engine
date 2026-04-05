@@ -13,7 +13,7 @@ import { formatAppendSystemContext } from '../../../openclaw-plugin/src/formatte
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = resolve(__dirname, '../../../../');
-const distBinPath = join(rootDir, 'dist', 'bin', 'vault.js');
+const distBinPath = join(rootDir, 'packages', 'core', 'dist', 'bin', 'vault.js');
 const ABIDAN_VAULT_PATH = resolve(homedir(), 'projects/abidan-vault');
 const MIN_BM25_SCORE = 0.1;
 const MIN_COMPOUND_SCORE = 0.3;
