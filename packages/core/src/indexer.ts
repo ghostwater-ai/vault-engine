@@ -98,7 +98,7 @@ export interface IndexStats {
   documentCount: number;
   /** Distribution of documents by note type */
   typeDistribution: Record<NoteType, number>;
-  /** Approximate size of the index in bytes */
+  /** UTF-8 byte size of the serialized MiniSearch index payload */
   indexSizeBytes: number;
   /** ISO timestamp of the last full index build, or empty string if not built */
   lastBuildTime: string;
@@ -252,17 +252,8 @@ export class VaultIndex {
       typeDistribution[doc.noteType]++;
     }
 
-    // Estimate index size by serializing the MiniSearch index to JSON
-    // This provides a rough approximation of actual memory usage
-    let indexSizeBytes: number;
-    try {
-      indexSizeBytes = JSON.stringify(this.miniSearch).length;
-    } catch {
-      // Fallback to rough estimate if serialization fails
-      const avgDocSize = 2000;
-      const indexOverhead = 1.5;
-      indexSizeBytes = Math.round(this.documents.size * avgDocSize * indexOverhead);
-    }
+    const serializedIndexPayload = JSON.stringify(this.miniSearch.toJSON());
+    const indexSizeBytes = Buffer.byteLength(serializedIndexPayload, 'utf8');
 
     return {
       documentCount: this.documents.size,
