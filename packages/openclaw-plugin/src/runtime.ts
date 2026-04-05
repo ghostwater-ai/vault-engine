@@ -238,11 +238,10 @@ function startInitialization(config: PluginConfig, logger: Logger | undefined): 
 }
 
 export function disableForMissingConfig(logger: Logger | undefined): void {
-  engineState = { status: 'disabled', reason: 'missing-vault-path' };
   warnOnce(
     logger,
     'missing-vault-path',
-    '[vault-engine] missing or invalid config.vaultPath. Disabling plugin.'
+    '[vault-engine] missing or invalid config.vaultPath. Skipping vault context/tool for this call.'
   );
 }
 

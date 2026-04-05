@@ -376,4 +376,36 @@ describe('openclaw plugin runtime', () => {
       })
     );
   });
+
+  it('missing config call does not permanently disable later valid tool initialization', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
+    const queryResult = createQueryResult({ query: 'recovered' });
+    queryMock.mockReturnValue(queryResult);
+
+    const mod = await import('./plugin.js');
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+
+    await expect(hook({ config: {}, logger: { warn: vi.fn() } })).resolves.toBeUndefined();
+    expect(mod.__testing.getState()).toBe('idle');
+
+    const result = await tool.execute(
+      'req-recover',
+      {
+        query: 'recovered',
+      },
+      {
+        config: { vaultPath: '/tmp' },
+      }
+    );
+
+    expect(result).toBe(queryResult);
+    expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
+    expect(mod.__testing.getState()).toBe('ready');
+  });
 });

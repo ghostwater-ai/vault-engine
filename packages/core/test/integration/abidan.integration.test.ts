@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, type TestContext } from 'vitest';
 
-import { query, rebuildIndex } from '../../src/index.js';
+import { query, rebuildIndex, tokenize } from '../../src/index.js';
 import { formatAppendSystemContext } from '../../../openclaw-plugin/src/formatter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,6 +47,11 @@ function runCli(args: string): { status: number | null; stdout: string; stderr: 
 
 function toSearchableText(input: { title: string; description?: string; path: string; rawBody?: string }): string {
   return `${input.title} ${input.description ?? ''} ${input.path} ${input.rawBody ?? ''}`.toLowerCase();
+}
+
+function toVaultRelativePath(path: string): string {
+  const prefix = `${ABIDAN_VAULT_PATH}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
 
 function assertScoringInvariants(result: ReturnType<typeof query>): void {
@@ -123,8 +128,14 @@ describe('integration: Abidan vault retrieval and CLI', () => {
 
     const topResult = result.results[0];
     expect(topResult).toBeDefined();
-    expect(topResult?.doc.noteType === 'belief' || topResult?.doc.noteType === 'research').toBe(true);
-    expect(toSearchableText(topResult?.doc ?? { title: '', path: '' })).toContain('memory');
+    expect(topResult?.doc.noteType).toBe('belief');
+    expect(toVaultRelativePath(topResult?.doc.path ?? '')).toBe('beliefs/memory-should-be-automatic-not-disciplined.md');
+    expect(toVaultRelativePath(result.results[1]?.doc.path ?? '')).toBe(
+      'research/notes/agent-native-memory-beats-external-memory-services.md'
+    );
+    expect(toVaultRelativePath(result.results[2]?.doc.path ?? '')).toBe(
+      'research/notes/memory-index-not-storage-claude-code-architecture.md'
+    );
   });
 
   it('integration: known query "what do we think about retrieval" returns retrieval-focused belief/research results', async (context) => {
@@ -135,8 +146,12 @@ describe('integration: Abidan vault retrieval and CLI', () => {
     const topResult = result.results[0];
     const topThree = result.results.slice(0, 3);
     expect(topResult).toBeDefined();
-    expect(topResult?.doc.noteType === 'belief' || topResult?.doc.noteType === 'research').toBe(true);
-    expect(topThree.some((item) => toSearchableText(item.doc).includes('retrieval'))).toBe(true);
+    expect(topResult?.doc.noteType).toBe('belief');
+    expect(topThree.map((item) => toVaultRelativePath(item.doc.path))).toEqual([
+      'beliefs/quality-over-cost-always.md',
+      'beliefs/memory-should-be-automatic-not-disciplined.md',
+      'beliefs/enforcement-beats-documentation.md',
+    ]);
   });
 
   it('integration: known query "byterover" returns ByteRover research result', async (context) => {
@@ -147,7 +162,9 @@ describe('integration: Abidan vault retrieval and CLI', () => {
     const topResult = result.results[0];
     expect(topResult).toBeDefined();
     expect(topResult?.doc.noteType).toBe('research');
-    expect(toSearchableText(topResult?.doc ?? { title: '', path: '' })).toContain('byterover');
+    expect(toVaultRelativePath(topResult?.doc.path ?? '')).toBe(
+      'research/notes/agent-native-memory-beats-external-memory-services.md'
+    );
   });
 
   it('integration: known query marketing/GTM surfaces topic page(s)', async (context) => {
@@ -170,7 +187,9 @@ describe('integration: Abidan vault retrieval and CLI', () => {
 
   it('integration: unrelated query with default thresholds returns no results', async (context) => {
     const index = await getAbidanIndex(context);
-    const result = query(index, 'the and of in to');
+    const unrelatedQuery = 'ornithopter helioseismology cryobiology';
+    expect(tokenize(unrelatedQuery)).toHaveLength(3);
+    const result = query(index, unrelatedQuery);
     expect(result.results).toHaveLength(0);
   });
 
