@@ -183,7 +183,39 @@ describe('openclaw plugin runtime', () => {
       expect.anything(),
       'fourth user',
       expect.objectContaining({
+        maxResults: 3,
         context: 'second user\n\nthird user\n\nfourth user',
+      })
+    );
+  });
+
+  it('forwards minScore and minBm25Score to query options', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
+    queryMock.mockReturnValue(createQueryResult());
+
+    const mod = await import('./plugin.js');
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+
+    const config = {
+      vaultPath: '/tmp',
+      injection: {
+        minScore: 0.77,
+        minBm25Score: 0.22,
+      },
+    };
+    const messages = [{ role: 'user', content: 'score filters' }];
+
+    await hook({ config, messages });
+    await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
+    await hook({ config, messages });
+
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'score filters',
+      expect.objectContaining({
+        minScore: 0.77,
+        minBm25Score: 0.22,
       })
     );
   });

@@ -51,6 +51,7 @@ const DEFAULT_INJECTION_CONFIG: InjectionConfig = {
   minScore: 0.3,
   minBm25Score: 0.1,
 };
+const FIXED_QUERY_MAX_RESULTS = 3;
 
 const warnedKeys = new Set<string>();
 let engineState: EngineState = { status: 'idle' };
@@ -253,7 +254,7 @@ function runQuery(index: VaultIndex, userMessages: string[], config: PluginConfi
   const context = userMessages.slice(-3).join('\n\n');
 
   return query(index, queryText, {
-    maxResults: config.injection.maxResults,
+    maxResults: FIXED_QUERY_MAX_RESULTS,
     minScore: config.injection.minScore,
     minBm25Score: config.injection.minBm25Score,
     context,

@@ -8,6 +8,7 @@ const HEADER = '## Vault Context';
 const MAX_RESULTS = 3;
 const PER_RESULT_TOKEN_CAP = 400;
 const TOTAL_TOKEN_CAP = 1500;
+const SEPARATOR = '\n\n';
 
 function estimateTokenCount(text: string): number {
   return Math.ceil(text.length / 4);
@@ -56,18 +57,19 @@ export function formatAppendSystemContext(
     chunks.push({ text, tokens });
   }
 
-  let totalTokens = usedTokens + chunks.reduce((acc, chunk) => acc + chunk.tokens, 0);
+  const separatorTokens = estimateTokenCount(SEPARATOR);
+  let totalTokens = usedTokens + chunks.reduce((acc, chunk) => acc + chunk.tokens + separatorTokens, 0);
   while (totalTokens > availableTokens && chunks.length > 0) {
     const removed = chunks.pop();
     if (!removed) {
       break;
     }
-    totalTokens -= removed.tokens;
+    totalTokens -= removed.tokens + separatorTokens;
   }
 
   if (chunks.length === 0) {
     return undefined;
   }
 
-  return [HEADER, ...chunks.map((chunk) => chunk.text)].join('\n\n');
+  return [HEADER, ...chunks.map((chunk) => chunk.text)].join(SEPARATOR);
 }
