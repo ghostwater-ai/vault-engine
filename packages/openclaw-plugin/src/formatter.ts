@@ -5,7 +5,9 @@ export interface InjectionFormatOptions {
 }
 
 const HEADER = '## Vault Context';
+const MAX_RESULTS = 3;
 const PER_RESULT_TOKEN_CAP = 400;
+const TOTAL_TOKEN_CAP = 1500;
 
 function estimateTokenCount(text: string): number {
   return Math.ceil(text.length / 4);
@@ -39,25 +41,33 @@ export function formatAppendSystemContext(
     return undefined;
   }
 
-  const chunks: string[] = [HEADER];
-  let usedTokens = estimateTokenCount(HEADER);
-
-  for (const result of queryResult.results) {
-    const rawChunk = formatResult(result);
-    const cappedChunk = truncateToTokenCap(rawChunk, PER_RESULT_TOKEN_CAP);
-    const chunkTokens = estimateTokenCount(cappedChunk);
-
-    if (usedTokens + chunkTokens > options.maxTokens) {
-      break;
-    }
-
-    chunks.push(cappedChunk);
-    usedTokens += chunkTokens;
-  }
-
-  if (chunks.length === 1) {
+  const availableTokens = Math.min(TOTAL_TOKEN_CAP, Math.max(1, Math.floor(options.maxTokens)));
+  const selectedResults = queryResult.results.slice(0, MAX_RESULTS);
+  const usedTokens = estimateTokenCount(HEADER);
+  if (usedTokens > availableTokens) {
     return undefined;
   }
 
-  return chunks.join('\n\n');
+  const chunks: Array<{ text: string; tokens: number }> = [];
+  for (const result of selectedResults) {
+    const rawChunk = formatResult(result);
+    const text = truncateToTokenCap(rawChunk, PER_RESULT_TOKEN_CAP);
+    const tokens = estimateTokenCount(text);
+    chunks.push({ text, tokens });
+  }
+
+  let totalTokens = usedTokens + chunks.reduce((acc, chunk) => acc + chunk.tokens, 0);
+  while (totalTokens > availableTokens && chunks.length > 0) {
+    const removed = chunks.pop();
+    if (!removed) {
+      break;
+    }
+    totalTokens -= removed.tokens;
+  }
+
+  if (chunks.length === 0) {
+    return undefined;
+  }
+
+  return [HEADER, ...chunks.map((chunk) => chunk.text)].join('\n\n');
 }

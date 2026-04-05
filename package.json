@@ -12,7 +12,7 @@
     "clean": "tsc --build --clean",
     "test": "vitest",
     "test:compact": "vitest run --reporter=dot",
-    "typecheck": "tsc --build --noEmit"
+    "typecheck": "tsc --noEmit -p packages/core/tsconfig.json && tsc --noEmit -p packages/openclaw-plugin/tsconfig.json && tsc --noEmit -p bin/tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^22.15.2",

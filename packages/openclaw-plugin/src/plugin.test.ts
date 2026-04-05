@@ -95,6 +95,8 @@ describe('openclaw plugin runtime', () => {
     expect(result).toEqual({
       appendSystemContext: expect.stringContaining('## Vault Context'),
     });
+    expect(result).not.toHaveProperty('systemPrompt');
+    expect(result).not.toHaveProperty('prependContext');
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
 
