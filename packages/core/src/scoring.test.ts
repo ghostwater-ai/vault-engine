@@ -259,6 +259,11 @@ describe('normalizeBm25', () => {
     expect(normalizeBm25(2)).toBeGreaterThan(normalizeBm25(1));
     expect(normalizeBm25(5)).toBeGreaterThan(normalizeBm25(3));
   });
+
+  it('clamps negative inputs to zero', () => {
+    expect(normalizeBm25(-1)).toBe(0);
+    expect(normalizeBm25(-0.5)).toBe(0);
+  });
 });
 
 describe('computeScore', () => {
