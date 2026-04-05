@@ -84,6 +84,33 @@ describe('VaultWatcher', () => {
   });
 
   describe('start and stop', () => {
+    it('start() does not force polling in default chokidar options', async () => {
+      vi.resetModules();
+      const onMock = vi.fn();
+      const closeMock = vi.fn().mockResolvedValue(undefined);
+      const fakeWatcher = { on: onMock, close: closeMock } as any;
+      onMock.mockImplementation((event: string, cb: () => void) => {
+        if (event === 'ready') {
+          cb();
+        }
+        return fakeWatcher;
+      });
+      const watchMock = vi.fn(() => fakeWatcher);
+
+      vi.doMock('chokidar', () => ({ watch: watchMock }));
+      const { VaultWatcher: MockedVaultWatcher } = await import('./watcher.js');
+
+      const isolatedWatcher = new MockedVaultWatcher(tempDir, index);
+      await isolatedWatcher.start();
+
+      const options = watchMock.mock.calls[0]?.[1];
+      expect(options?.usePolling).not.toBe(true);
+      await isolatedWatcher.stop();
+
+      vi.doUnmock('chokidar');
+      vi.resetModules();
+    });
+
     it('start() begins watching without errors', async () => {
       watcher = new VaultWatcher(tempDir, index);
       await expect(watcher.start()).resolves.not.toThrow();

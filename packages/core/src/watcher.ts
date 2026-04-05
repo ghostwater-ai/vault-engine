@@ -98,9 +98,6 @@ export class VaultWatcher {
     this.watcher = watch(watchPaths, {
       // Don't emit events for initial directory scan
       ignoreInitial: true,
-      // Use polling for better cross-platform compatibility
-      usePolling: true,
-      interval: 100,
       // Follow symlinks
       followSymlinks: true,
       // Wait for write to finish
