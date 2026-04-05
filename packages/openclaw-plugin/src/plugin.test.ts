@@ -9,6 +9,16 @@ const definePluginEntryMock = vi.fn(<T>(entry: T) => entry);
 const rebuildIndexMock = vi.fn();
 const queryMock = vi.fn();
 
+interface RegisteredTool {
+  name: string;
+  description: string;
+  inputSchema: {
+    required?: string[];
+    properties?: Record<string, unknown>;
+  };
+  execute: (requestId: string, input: Record<string, unknown>, context?: Record<string, unknown>) => Promise<unknown>;
+}
+
 vi.mock('openclaw/plugin-sdk/plugin-entry', () => ({
   definePluginEntry: definePluginEntryMock,
 }), { virtual: true });
@@ -62,15 +72,41 @@ describe('openclaw plugin runtime', () => {
     mod.__testing.resetState();
   });
 
-  it('registers only before_prompt_build hook and no slot kind', async () => {
+  it('exposes register + before_prompt_build hook and no slot kind', async () => {
     const mod = await import('./plugin.js');
 
     expect(definePluginEntryMock).toHaveBeenCalledTimes(1);
     expect(mod.plugin).not.toHaveProperty('kind');
+    expect(mod.plugin).toHaveProperty('register');
     expect(mod.plugin).toHaveProperty('hooks.before_prompt_build');
     expect(Object.keys((mod.plugin as { hooks: Record<string, unknown> }).hooks)).toEqual([
       'before_prompt_build',
     ]);
+  });
+
+  it('registers vault_query tool with expected description and input schema', async () => {
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+
+    expect(registerTool).toHaveBeenCalledTimes(1);
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+    expect(tool.name).toBe('vault_query');
+    expect(tool.description).toBe(
+      "Search the knowledge vault for specific information. Use when passive vault context isn't sufficient or you need to explore a topic in depth."
+    );
+    expect(tool.inputSchema.required).toEqual(['query']);
+    expect(tool.inputSchema.properties).toEqual(
+      expect.objectContaining({
+        query: expect.any(Object),
+        maxResults: expect.any(Object),
+        noteTypes: expect.any(Object),
+        context: expect.any(Object),
+      })
+    );
   });
 
   it('initializes once, skips while initializing, then reuses singleton', async () => {
@@ -246,5 +282,98 @@ describe('openclaw plugin runtime', () => {
     await hook({ config, messages });
 
     expect(rebuildIndexMock).toHaveBeenCalledWith('/tmp');
+  });
+
+  it('vault_query forwards input and returns QueryResult without transformation', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
+    const queryResult = createQueryResult({ query: 'memory systems' });
+    queryMock.mockReturnValue(queryResult);
+
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+
+    const result = await tool.execute(
+      'req-1',
+      {
+        query: 'memory systems',
+        maxResults: 7,
+        noteTypes: ['belief', 'research'],
+        context: 'recall systems',
+      },
+      {
+        config: { vaultPath: '/tmp' },
+      }
+    );
+
+    expect(result).toBe(queryResult);
+    expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'memory systems',
+      {
+        maxResults: 7,
+        noteTypes: ['belief', 'research'],
+        context: 'recall systems',
+      }
+    );
+  });
+
+  it('tool initializes shared singleton when called first, and hook reuses ready engine', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
+    queryMock
+      .mockReturnValueOnce(createQueryResult({ query: 'from tool' }))
+      .mockReturnValueOnce(createQueryResult({ query: 'from hook' }));
+
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+
+    await tool.execute(
+      'req-tool-first',
+      {
+        query: 'tool-first query',
+      },
+      {
+        config: { vaultPath: '/tmp' },
+      }
+    );
+
+    expect(mod.__testing.getState()).toBe('ready');
+    expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
+
+    await hook({
+      config: { vaultPath: '/tmp' },
+      messages: [{ role: 'user', content: 'hook query' }],
+    });
+
+    expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
+    expect(queryMock).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      'tool-first query',
+      {
+        maxResults: undefined,
+        noteTypes: undefined,
+        context: undefined,
+      }
+    );
+    expect(queryMock).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      'hook query',
+      expect.objectContaining({
+        maxResults: 3,
+        context: 'hook query',
+      })
+    );
   });
 });
