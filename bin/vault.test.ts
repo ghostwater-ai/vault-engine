@@ -131,6 +131,35 @@ describe("vault CLI", () => {
     expect(used).toBeLessThanOrEqual(budget);
   });
 
+  it("vault query --dry-run enforces top-3 results even when --max-results is larger", () => {
+    const output = runCli(`query "test" --vault-path "${fixtureVaultPath}" --dry-run --max-results 10`);
+
+    const headers = output
+      .split("\n")
+      .filter((line) => /^\[[a-z]+\|[^\]]+\]\s.+/.test(line));
+
+    expect(headers.length).toBeLessThanOrEqual(3);
+  });
+
+  it("vault query accepts plural entities note type", () => {
+    const output = runCli(`query "test" --vault-path "${fixtureVaultPath}" --types entities`);
+    expect(output).toContain("Query: test");
+  });
+
+  it("vault query rejects malformed numeric option values", () => {
+    const maxResultsResult = runCliResult(
+      `query "test" --vault-path "${fixtureVaultPath}" --max-results 1.5`
+    );
+    expect(maxResultsResult.status).not.toBe(0);
+    expect(maxResultsResult.stderr).toContain("Expected a positive integer, received: 1.5");
+
+    const minScoreResult = runCliResult(
+      `query "test" --vault-path "${fixtureVaultPath}" --min-score 0.3oops`
+    );
+    expect(minScoreResult.status).not.toBe(0);
+    expect(minScoreResult.stderr).toContain("Expected a score between 0 and 1, received: 0.3oops");
+  });
+
   it("vault index stats prints document count and type distribution", () => {
     const output = runCli(`index stats --vault-path "${fixtureVaultPath}"`);
 

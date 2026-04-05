@@ -13,6 +13,7 @@ import type { NoteType } from "@ghostwater/vault-engine";
 const VERSION = "0.1.0";
 const DRY_RUN_TOTAL_TOKEN_BUDGET = 1500;
 const DRY_RUN_PER_RESULT_TOKEN_BUDGET = 400;
+const DRY_RUN_MAX_RESULTS = 3;
 const AVG_CHARS_PER_TOKEN = 4;
 const VALID_NOTE_TYPES = [
   "experience",
@@ -29,7 +30,12 @@ function estimateTokens(text: string): number {
 }
 
 function parsePositiveInteger(value: string): number {
-  const parsed = Number.parseInt(value, 10);
+  const normalized = value.trim();
+  if (!/^[1-9]\d*$/.test(normalized)) {
+    throw new InvalidArgumentError(`Expected a positive integer, received: ${value}`);
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new InvalidArgumentError(`Expected a positive integer, received: ${value}`);
   }
@@ -37,7 +43,12 @@ function parsePositiveInteger(value: string): number {
 }
 
 function parseScore(value: string): number {
-  const parsed = Number.parseFloat(value);
+  const normalized = value.trim();
+  if (!/^(\d+(\.\d+)?|\.\d+)$/.test(normalized)) {
+    throw new InvalidArgumentError(`Expected a score between 0 and 1, received: ${value}`);
+  }
+
+  const parsed = Number(normalized);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
     throw new InvalidArgumentError(`Expected a score between 0 and 1, received: ${value}`);
   }
@@ -48,7 +59,11 @@ function normalizeNoteType(rawType: string): string | null {
   const normalized = rawType.trim().toLowerCase();
   if (!normalized) return null;
 
-  const singular = normalized.endsWith("s") ? normalized.slice(0, -1) : normalized;
+  const singular = normalized.endsWith("ies")
+    ? `${normalized.slice(0, -3)}y`
+    : normalized.endsWith("s")
+      ? normalized.slice(0, -1)
+      : normalized;
   if (VALID_NOTE_TYPES.includes(singular as (typeof VALID_NOTE_TYPES)[number])) {
     return singular;
   }
@@ -226,10 +241,11 @@ async function handleQuery(
 
   const minScore = opts.minScore ?? DEFAULT_QUERY_OPTIONS.minScore;
   const minBm25Score = DEFAULT_QUERY_OPTIONS.minBm25Score;
+  const maxResults = opts.dryRun ? DRY_RUN_MAX_RESULTS : opts.maxResults;
 
   const result = query(index, text, {
     context: opts.context,
-    maxResults: opts.maxResults,
+    maxResults,
     minScore: opts.minScore,
     noteTypes: opts.types as NoteType[] | undefined,
     minBm25Score,
