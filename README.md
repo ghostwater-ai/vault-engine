@@ -24,18 +24,117 @@ Knowledge goes into vaults but never comes back out. Agents answer from their tr
 ## Installation
 
 ```bash
-npm install @ghostwater/vault-engine
+npm install @ghostwater/vault-engine @ghostwater/vault-engine-openclaw
 ```
 
-## Usage
+## CLI Usage
+
+Set a vault path once:
 
 ```bash
-# Query the vault
-vault query "what do we think about memory systems?"
-
-# Show index statistics
-vault index stats
+export VAULT_PATH=~/projects/abidan-vault
 ```
+
+Run a standard query:
+
+```bash
+vault query "what do we think about memory systems?"
+```
+
+Run a query with context and explain mode:
+
+```bash
+vault query "retrieval architecture" \
+  --context "we were discussing memory systems and query latency" \
+  --explain
+```
+
+Run a query with JSON output:
+
+```bash
+vault query "byterover" --json
+```
+
+Filter by note type and cap result count:
+
+```bash
+vault query "go to market" --types topic,research --max-results 5
+```
+
+Index management:
+
+```bash
+vault index stats
+vault index rebuild
+```
+
+## OpenClaw Plugin Config
+
+Install the plugin package:
+
+```bash
+npm install @ghostwater/vault-engine-openclaw
+```
+
+Configure OpenClaw to load the plugin and provide `vaultPath`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "vault-engine": {
+        "enabled": true,
+        "package": "@ghostwater/vault-engine-openclaw",
+        "config": {
+          "vaultPath": "/home/you/projects/abidan-vault",
+          "injection": {
+            "maxResults": 3,
+            "maxTokens": 1500,
+            "minScore": 0.3,
+            "minBm25Score": 0.1
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Behavior:
+- Uses `before_prompt_build` to inject retrieval context automatically.
+- Registers the `vault_query` tool for explicit deeper retrieval.
+- Shares one engine singleton between passive injection and tool calls.
+
+## `vault_query` Tool Usage
+
+Tool name: `vault_query`
+
+Input contract:
+
+```ts
+{
+  query: string;
+  maxResults?: number;
+  noteTypes?: string[];
+  context?: string;
+}
+```
+
+Invocation example:
+
+```json
+{
+  "tool": "vault_query",
+  "input": {
+    "query": "What do we believe about memory systems?",
+    "maxResults": 5,
+    "noteTypes": ["belief", "research"],
+    "context": "We were discussing retrieval architecture tradeoffs."
+  }
+}
+```
+
+Return value: full structured `QueryResult` from `@ghostwater/vault-engine`.
 
 ## Clean-Room Implementation Notice
 
