@@ -5,10 +5,19 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "openclaw": {
+    "extensions": [
+      "./dist/plugin.js"
+    ]
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "import": "./dist/plugin.js"
     }
   },
   "files": [
@@ -29,5 +38,8 @@
   },
   "dependencies": {
     "@ghostwater/vault-engine": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
   }
 }
