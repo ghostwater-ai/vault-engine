@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,10 +15,35 @@ const fixtureVaultPath = join(
   "vault"
 );
 
-function runCli(args: string): string {
-  return execSync(`node ${distBinPath} ${args}`, {
-    encoding: "utf-8",
+function splitArgs(args: string): string[] {
+  return args.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((token) => token.replace(/^"|"$/g, "")) ?? [];
+}
+
+function runCli(args: string, envOverrides?: NodeJS.ProcessEnv): string {
+  const result = spawnSync("node", [distBinPath, ...splitArgs(args)], {
     cwd: rootDir,
+    encoding: "utf-8",
+    env: {
+      ...process.env,
+      ...envOverrides,
+    },
+  });
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || `CLI failed with exit code ${result.status ?? "unknown"}`);
+  }
+
+  return result.stdout;
+}
+
+function runCliResult(args: string, envOverrides?: NodeJS.ProcessEnv) {
+  return spawnSync("node", [distBinPath, ...splitArgs(args)], {
+    cwd: rootDir,
+    encoding: "utf-8",
+    env: {
+      ...process.env,
+      ...envOverrides,
+    },
   });
 }
 
@@ -104,5 +129,55 @@ describe("vault CLI", () => {
     const budget = Number(tokenMatch?.[2] ?? "0");
     expect(budget).toBe(1500);
     expect(used).toBeLessThanOrEqual(budget);
+  });
+
+  it("vault index stats prints document count and type distribution", () => {
+    const output = runCli(`index stats --vault-path "${fixtureVaultPath}"`);
+
+    expect(output).toContain("Index stats:");
+    expect(output).toContain("Document count: 11");
+    expect(output).toContain("Type distribution:");
+    expect(output).toContain("belief: 1");
+    expect(output).toContain("experience: 2");
+    expect(output).toContain("research: 3");
+    expect(output).toContain("topic: 2");
+    expect(output).toContain("Index size (bytes):");
+    expect(output).toContain("Last rebuild:");
+  });
+
+  it("vault index rebuild performs full rebuild and prints completion plus stats", () => {
+    const output = runCli(`index rebuild --vault-path "${fixtureVaultPath}"`);
+
+    expect(output).toContain("Rebuild complete.");
+    expect(output).toContain("Index stats:");
+    expect(output).toContain("Document count: 11");
+    expect(output).toContain("Type distribution:");
+  });
+
+  it("vault --help lists query flags and index subcommands", () => {
+    const output = runCli("--help");
+
+    expect(output).toContain("--vault-path <path>");
+    expect(output).toContain("query [options] <text>");
+    expect(output).toContain("index");
+    expect(output).toContain("--json");
+    expect(output).toContain("--explain");
+    expect(output).toContain("--context <text>");
+    expect(output).toContain("--types <types>");
+    expect(output).toContain("--max-results <count>");
+    expect(output).toContain("--min-score <score>");
+    expect(output).toContain("--dry-run");
+    expect(output).toContain("index stats");
+    expect(output).toContain("index rebuild");
+  });
+
+  it("CLI errors with helpful message when vault path is missing", () => {
+    const result = runCliResult(`index stats`, {
+      ...process.env,
+      VAULT_PATH: "",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Vault path is required. Provide --vault-path <path> or set VAULT_PATH in your environment.");
   });
 });

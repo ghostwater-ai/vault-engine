@@ -90,6 +90,24 @@ function formatResultLine(result: (Awaited<ReturnType<typeof query>>) ["results"
   return `${result.score.toFixed(3)}  [${result.doc.noteType}|${status}] ${result.doc.title}${description}`;
 }
 
+function renderIndexStats(index: Awaited<ReturnType<typeof rebuildIndex>>): string {
+  const stats = index.getStats();
+  const typeEntries = Object.entries(stats.typeDistribution)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([type, count]) => `  - ${type}: ${count}`);
+
+  const lines = [
+    "Index stats:",
+    `Document count: ${stats.documentCount}`,
+    "Type distribution:",
+    ...typeEntries,
+    `Index size (bytes): ${stats.indexSizeBytes}`,
+    `Last rebuild: ${stats.lastBuildTime || "unavailable"}`,
+  ];
+
+  return lines.join("\n");
+}
+
 function clampToTokenBudget(text: string, tokenBudget: number): string {
   if (estimateTokens(text) <= tokenBudget) {
     return text;
@@ -250,6 +268,22 @@ async function handleQuery(
   }
 }
 
+async function handleIndexStats(command: Command): Promise<void> {
+  const globalOptions = command.parent?.parent?.opts<{ vaultPath?: string }>() ?? {};
+  const vaultPath = resolveVaultPath(globalOptions.vaultPath);
+  const index = await rebuildIndex(vaultPath);
+  console.log(renderIndexStats(index));
+}
+
+async function handleIndexRebuild(command: Command): Promise<void> {
+  const globalOptions = command.parent?.parent?.opts<{ vaultPath?: string }>() ?? {};
+  const vaultPath = resolveVaultPath(globalOptions.vaultPath);
+  const index = await rebuildIndex(vaultPath);
+
+  console.log("Rebuild complete.");
+  console.log(renderIndexStats(index));
+}
+
 async function main(): Promise<void> {
   const program = new Command();
 
@@ -258,6 +292,22 @@ async function main(): Promise<void> {
     .description("Retrieval engine for structured Markdown knowledge vaults")
     .version(VERSION)
     .option("--vault-path <path>", "Path to the vault directory (or use VAULT_PATH)");
+  program.addHelpText(
+    "after",
+    `
+Implemented query flags:
+  --json
+  --explain
+  --context <text>
+  --types <types>
+  --max-results <count>
+  --min-score <score>
+  --dry-run
+
+Implemented index subcommands:
+  index stats
+  index rebuild`
+  );
 
   program
     .command("query")
@@ -277,18 +327,12 @@ async function main(): Promise<void> {
   indexCommand
     .command("rebuild")
     .description("Force a full reindex of the vault")
-    .action(() => {
-      console.error("index rebuild is not part of STORY-1 scope.");
-      process.exitCode = 1;
-    });
+    .action((_, command) => handleIndexRebuild(command));
 
   indexCommand
     .command("stats")
     .description("Show index statistics")
-    .action(() => {
-      console.error("index stats is not part of STORY-1 scope.");
-      process.exitCode = 1;
-    });
+    .action((_, command) => handleIndexStats(command));
 
   try {
     await program.parseAsync(process.argv);
