@@ -44,6 +44,13 @@ interface PendingChange {
   path: string;
 }
 
+function isDuplicateDocumentError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.startsWith('Document already exists:')
+  );
+}
+
 /**
  * VaultWatcher monitors vault directories for file changes and updates the index.
  *
@@ -200,8 +207,13 @@ export class VaultWatcher {
         if (doc) {
           try {
             this.index.addDocument(doc);
-          } catch {
-            // Document might already exist if watcher fired multiple times
+          } catch (error) {
+            if (!isDuplicateDocumentError(error)) {
+              console.warn(
+                `Failed to add document from watcher change: ${path}`,
+                error
+              );
+            }
           }
         }
         break;
