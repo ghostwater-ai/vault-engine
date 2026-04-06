@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -316,6 +316,31 @@ describe("vault CLI", () => {
       expect(parsed.plugins.entries["vault-engine"].package).toBe("@ghostwater/vault-engine-openclaw");
       expect(parsed.plugins.entries["vault-engine"].config.vaultPath).toBe("/tmp/new-vault");
       expect(parsed.plugins.entries["vault-engine"].config.injection.maxResults).toBe(2);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install resolves relative vault path to an absolute path in config", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-relative-vault-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      runCli(`openclaw install --config "${configPath}" --vault-path "./vault"`);
+
+      const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as {
+        plugins: {
+          entries: {
+            "vault-engine": {
+              config: {
+                vaultPath: string;
+              };
+            };
+          };
+        };
+      };
+
+      expect(parsed.plugins.entries["vault-engine"].config.vaultPath).toBe(resolve(rootDir, "vault"));
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

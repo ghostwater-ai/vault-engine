@@ -458,7 +458,7 @@ async function handleOpenClawInstall(
   const currentConfig = await readOpenClawConfig(configPath);
   const nextConfig = applyOpenClawPluginConfigUpdate(currentConfig, {
     packageName: options.package ?? DEFAULT_OPENCLAW_PLUGIN_PACKAGE,
-    vaultPath: parseNonEmptyString(resolvedVaultPath),
+    vaultPath: resolve(parseNonEmptyString(resolvedVaultPath)),
     allowSessionKeys: options.allow.map(parseNonEmptyString),
     denySessionKeys: options.deny.map(parseNonEmptyString),
   });
