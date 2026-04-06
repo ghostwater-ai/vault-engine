@@ -377,6 +377,78 @@ describe("vault CLI", () => {
     }
   });
 
+  it("vault openclaw install --print writes config and prints resulting JSON", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-print-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      const output = runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --print`
+      );
+
+      const written = JSON.parse(readFileSync(configPath, "utf-8")) as {
+        plugins: {
+          entries: {
+            "vault-engine": {
+              config: {
+                vaultPath: string;
+                scope: {
+                  allowSessionKeys: string[];
+                };
+              };
+            };
+          };
+        };
+      };
+
+      expect(output).toContain('"vault-engine"');
+      expect(output).toContain('"vaultPath": "/tmp/vault"');
+      expect(written.plugins.entries["vault-engine"].config.vaultPath).toBe("/tmp/vault");
+      expect(written.plugins.entries["vault-engine"].config.scope.allowSessionKeys).toEqual([
+        "agent:cpto:*",
+      ]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install reports no changes needed when rerun with same inputs", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-no-change-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --deny "agent:cpto:slack:sandbox:*"`
+      );
+
+      const output = runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --deny "agent:cpto:slack:sandbox:*"`
+      );
+
+      expect(output).toContain(`No changes needed: ${configPath}`);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install fails with helpful message when openclaw.json is invalid JSON", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-invalid-json-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      writeFileSync(configPath, "{invalid-json", "utf-8");
+
+      const result = runCliResult(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault"`
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`Failed to read OpenClaw config at ${configPath}:`);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("CLI errors with helpful message when vault path is missing", () => {
     const result = runCliResult(`index stats`, {
       ...process.env,
