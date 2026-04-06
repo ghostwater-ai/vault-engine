@@ -23,9 +23,25 @@ function truncateToTokenCap(text: string, maxTokens: number): string {
   return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
 }
 
+function selectSecondaryMetadata(result: ScoredDocument): string | undefined {
+  const { doc } = result;
+  if (doc.noteType === 'belief') {
+    return doc.confidence ?? doc.maturity;
+  }
+
+  if (doc.noteType === 'research') {
+    return doc.status;
+  }
+
+  return doc.status ?? doc.provenance ?? doc.date ?? doc.updatedAt;
+}
+
 function formatResult(result: ScoredDocument): string {
-  const status = result.doc.status ?? 'unknown';
-  const header = `[${result.doc.noteType}|${status}] ${result.doc.title}`;
+  const secondary = selectSecondaryMetadata(result);
+  const prefix = secondary
+    ? `[${result.doc.noteType}|${secondary}]`
+    : `[${result.doc.noteType}]`;
+  const header = `${prefix} ${result.doc.title}`;
 
   if (!result.doc.description) {
     return header;
