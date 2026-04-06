@@ -21,7 +21,16 @@ describe("README usage docs", () => {
     expect(readme).toContain("--dry-run");
     expect(readme).toContain('"vault-engine"');
     expect(readme).toContain('"vaultPath"');
-    expect(readme).toContain('"@ghostwater/vault-engine-openclaw"');
+    expect(readme).toContain("only writes config values under `plugins.entries.vault-engine.config`");
+    expect(readme).not.toContain('"enabled": true');
+  });
+
+  it("documents that package field is NOT written by openclaw install", () => {
+    const configBlockMatch = readme.match(/Resulting config shape[^`]*```json\n([\s\S]*?)```/);
+    expect(configBlockMatch).toBeTruthy();
+    const configBlock = configBlockMatch?.[1] ?? "";
+    expect(configBlock).not.toContain('"package"');
+    expect(readme).toContain("package` field for plugin discovery is **not** written");
   });
 
   it("documents vault_query tool inputs aligned with UAC-021", () => {
