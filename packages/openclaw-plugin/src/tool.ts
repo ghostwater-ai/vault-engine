@@ -2,7 +2,7 @@ import type { QueryResult } from '@ghostwater/vault-engine';
 
 import {
   ensureEngineReady,
-  evaluateSessionKeyScope,
+  getEligibleVaultsForTool,
   parseConfig,
   resolveSessionKey,
   runToolQuery,
@@ -18,6 +18,7 @@ interface VaultQueryToolInput {
   maxResults?: number;
   noteTypes?: string[];
   context?: string;
+  vault?: string;
 }
 
 interface ToolExecutionContext {
@@ -58,29 +59,34 @@ export function registerVaultQueryTool(api: ToolRegisterApi): void {
           items: { type: 'string' },
         },
         context: { type: 'string' },
+        vault: { type: 'string', minLength: 1 },
       },
     },
     async execute(_requestId: string, input: VaultQueryToolInput, context?: ToolExecutionContext): Promise<QueryResult> {
       const config = parseConfig(context?.config);
       if (!config) {
         disableForMissingConfig(context?.logger);
-        throw new Error('vault_query requires a valid plugin config with vaultPath');
+        throw new Error('vault_query requires a valid plugin config with vaults');
       }
 
-      const sessionScopeDecision = evaluateSessionKeyScope(config.scope, resolveSessionKey(context));
-      if (!sessionScopeDecision.inScope) {
-        if (sessionScopeDecision.reason === 'missing-session-key') {
+      const readyVaults = await ensureEngineReady(config, context?.logger);
+      if (!readyVaults) {
+        throw new Error('vault_query unavailable: vault engine is disabled or failed to initialize');
+      }
+
+      const sessionKey = resolveSessionKey(context);
+      const eligible = getEligibleVaultsForTool(readyVaults, sessionKey, input.vault);
+      if (eligible.vaults.length === 0) {
+        if (eligible.reason === 'vault-not-found') {
+          throw new Error(`vault_query unavailable: unknown vault "${input.vault}"`);
+        }
+        if (eligible.reason === 'missing-session-key') {
           throw new Error('vault_query unavailable: session key is required when scope rules are configured');
         }
         throw new Error('vault_query unavailable: current session is out of scope');
       }
 
-      const index = await ensureEngineReady(config, context?.logger);
-      if (!index) {
-        throw new Error('vault_query unavailable: vault engine is disabled or failed to initialize');
-      }
-
-      return runToolQuery(index, input);
+      return runToolQuery(eligible.vaults, input);
     },
   });
 }

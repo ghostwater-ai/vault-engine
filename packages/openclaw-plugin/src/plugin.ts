@@ -5,8 +5,7 @@ import {
   __testing as runtimeTesting,
   beginEngineInitialization,
   disableForMissingConfig,
-  evaluateSessionKeyScope,
-  getReadyEngineIndex,
+  getReadyEngineVaults,
   getUserMessages,
   parseConfig,
   resolveSessionKey,
@@ -43,11 +42,6 @@ async function beforePromptBuild(args: BeforePromptBuildArgs): Promise<HookResul
     return;
   }
 
-  const sessionScopeDecision = evaluateSessionKeyScope(config.scope, resolveSessionKey(args));
-  if (!sessionScopeDecision.inScope) {
-    return;
-  }
-
   const state = runtimeTesting.getState();
   if (state === 'disabled') {
     return;
@@ -62,8 +56,8 @@ async function beforePromptBuild(args: BeforePromptBuildArgs): Promise<HookResul
     return;
   }
 
-  const readyIndex = getReadyEngineIndex();
-  if (!readyIndex) {
+  const readyVaults = getReadyEngineVaults();
+  if (!readyVaults) {
     return;
   }
 
@@ -72,7 +66,7 @@ async function beforePromptBuild(args: BeforePromptBuildArgs): Promise<HookResul
     return;
   }
 
-  const result = runPassiveQuery(readyIndex, userMessages, config);
+  const result = runPassiveQuery(readyVaults, userMessages, config, resolveSessionKey(args));
   const appendSystemContext = formatAppendSystemContext(result, {
     maxTokens: config.injection.maxTokens,
   });
@@ -87,8 +81,37 @@ async function beforePromptBuild(args: BeforePromptBuildArgs): Promise<HookResul
 const configSchema = {
   type: 'object',
   additionalProperties: false,
+  required: ['vaults'],
   properties: {
-    vaultPath: { type: 'string', minLength: 1 },
+    vaults: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'description', 'vaultPath', 'mode'],
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          description: { type: 'string', minLength: 1 },
+          vaultPath: { type: 'string', minLength: 1 },
+          mode: { type: 'string', enum: ['passive', 'query-only'] },
+          scope: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              allowSessionKeys: {
+                type: 'array',
+                items: { type: 'string', minLength: 1 },
+              },
+              denySessionKeys: {
+                type: 'array',
+                items: { type: 'string', minLength: 1 },
+              },
+            },
+          },
+        },
+      },
+    },
     injection: {
       type: 'object',
       additionalProperties: false,
@@ -97,20 +120,6 @@ const configSchema = {
         maxTokens: { type: 'integer', minimum: 1 },
         minScore: { type: 'number' },
         minBm25Score: { type: 'number' },
-      },
-    },
-    scope: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        allowSessionKeys: {
-          type: 'array',
-          items: { type: 'string', minLength: 1 },
-        },
-        denySessionKeys: {
-          type: 'array',
-          items: { type: 'string', minLength: 1 },
-        },
       },
     },
   },

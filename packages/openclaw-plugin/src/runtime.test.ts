@@ -93,18 +93,25 @@ describe('session-key scope rules', () => {
         entries: {
           'vault-engine': {
             config: {
-              vaultPath: '/tmp',
-              scope: {
-                allowSessionKeys: ['agent:cpto:*'],
-                denySessionKeys: ['agent:cpto:slack:*'],
-              },
+              vaults: [
+                {
+                  name: 'Main',
+                  description: 'Primary vault',
+                  vaultPath: '/tmp',
+                  mode: 'passive',
+                  scope: {
+                    allowSessionKeys: ['agent:cpto:*'],
+                    denySessionKeys: ['agent:cpto:slack:*'],
+                  },
+                },
+              ],
             },
           },
         },
       },
     });
 
-    expect(parsed?.scope).toEqual({
+    expect(parsed?.vaults[0]?.scope).toEqual({
       allowSessionKeys: ['agent:cpto:*'],
       denySessionKeys: ['agent:cpto:slack:*'],
     });
@@ -116,20 +123,131 @@ describe('session-key scope rules', () => {
         entries: {
           'vault-engine': {
             config: {
-              vaultPath: '/tmp',
-              scope: {
-                allowSessionKeys: [' agent:cpto:slack:prod ', 'agent:cpto:*'],
-                denySessionKeys: [' agent:cpto:slack:sandbox:* '],
-              },
+              vaults: [
+                {
+                  name: 'Main',
+                  description: 'Primary vault',
+                  vaultPath: '/tmp',
+                  mode: 'passive',
+                  scope: {
+                    allowSessionKeys: [' agent:cpto:slack:prod ', 'agent:cpto:*'],
+                    denySessionKeys: [' agent:cpto:slack:sandbox:* '],
+                  },
+                },
+              ],
             },
           },
         },
       },
     });
 
-    expect(parsed?.scope).toEqual({
+    expect(parsed?.vaults[0]?.scope).toEqual({
       allowSessionKeys: ['agent:cpto:slack:prod', 'agent:cpto:*'],
       denySessionKeys: ['agent:cpto:slack:sandbox:*'],
+    });
+  });
+
+  it('parses valid multi-vault config with normalized values', () => {
+    const parsed = parseConfig({
+      injection: {
+        maxResults: 2.9,
+      },
+      vaults: [
+        {
+          name: ' Team Vault ',
+          description: ' Team memory ',
+          vaultPath: '~/vault/team',
+          mode: 'passive',
+          scope: {
+            allowSessionKeys: [' agent:cpto:* '],
+            denySessionKeys: [' agent:cpto:sandbox:* '],
+          },
+        },
+        {
+          name: ' Deep Archive ',
+          description: ' Query only archive ',
+          vaultPath: '/tmp/archive',
+          mode: 'query-only',
+        },
+      ],
+    });
+
+    expect(parsed).toMatchObject({
+      injection: {
+        maxResults: 2,
+      },
+      vaults: [
+        {
+          name: 'Team Vault',
+          description: 'Team memory',
+          mode: 'passive',
+          scope: {
+            allowSessionKeys: ['agent:cpto:*'],
+            denySessionKeys: ['agent:cpto:sandbox:*'],
+          },
+        },
+        {
+          name: 'Deep Archive',
+          description: 'Query only archive',
+          mode: 'query-only',
+          scope: {
+            allowSessionKeys: [],
+            denySessionKeys: [],
+          },
+        },
+      ],
+    });
+  });
+
+  it('rejects vault entries with invalid mode', () => {
+    const parsed = parseConfig({
+      vaults: [
+        {
+          name: 'Main',
+          description: 'Primary vault',
+          vaultPath: '/tmp',
+          mode: 'active',
+        },
+      ],
+    });
+
+    expect(parsed).toBeUndefined();
+  });
+
+  it('rejects vault entries with missing required fields', () => {
+    const parsed = parseConfig({
+      vaults: [
+        {
+          description: 'Primary vault',
+          vaultPath: '/tmp',
+          mode: 'passive',
+        },
+      ],
+    });
+
+    expect(parsed).toBeUndefined();
+  });
+
+  it('maps legacy single-vault config to one passive vault entry', () => {
+    const parsed = parseConfig({
+      vaultPath: '/tmp',
+      scope: {
+        allowSessionKeys: ['agent:cpto:*'],
+      },
+    });
+
+    expect(parsed).toMatchObject({
+      vaults: [
+        {
+          name: 'default',
+          description: 'Legacy single-vault config',
+          mode: 'passive',
+          scope: {
+            allowSessionKeys: ['agent:cpto:*'],
+            denySessionKeys: [],
+          },
+        },
+      ],
     });
   });
 });

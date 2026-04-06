@@ -64,6 +64,26 @@ function createMockIndex(documentCount = 1): { getStats: () => { documentCount: 
   };
 }
 
+function createPluginConfig(overrides?: Record<string, unknown>): Record<string, unknown> {
+  return {
+    injection: {
+      maxResults: 3,
+      maxTokens: 1500,
+      minScore: 0.3,
+      minBm25Score: 0.1,
+    },
+    vaults: [
+      {
+        name: 'default',
+        description: 'Default vault',
+        vaultPath: '/tmp',
+        mode: 'passive',
+      },
+    ],
+    ...overrides,
+  };
+}
+
 describe('openclaw plugin runtime', () => {
   beforeEach(async () => {
     vi.resetAllMocks();
@@ -105,8 +125,27 @@ describe('openclaw plugin runtime', () => {
         maxResults: expect.any(Object),
         noteTypes: expect.any(Object),
         context: expect.any(Object),
+        vault: expect.any(Object),
       })
     );
+  });
+
+  it('exposes config schema with required vault entries and mode enum', async () => {
+    const mod = await import('./plugin.js');
+    const schema = (mod.plugin as { manifest: { configSchema: Record<string, unknown> } }).manifest.configSchema as {
+      required?: string[];
+      properties?: Record<string, unknown>;
+    };
+    const vaults = schema.properties?.vaults as {
+      type?: string;
+      items?: { required?: string[]; properties?: Record<string, unknown> };
+    };
+    const mode = vaults.items?.properties?.mode as { enum?: string[] };
+
+    expect(schema.required).toContain('vaults');
+    expect(vaults.type).toBe('array');
+    expect(vaults.items?.required).toEqual(['name', 'description', 'vaultPath', 'mode']);
+    expect(mode.enum).toEqual(['passive', 'query-only']);
   });
 
   it('initializes once, skips while initializing, then reuses singleton', async () => {
@@ -123,7 +162,7 @@ describe('openclaw plugin runtime', () => {
     );
     queryMock.mockReturnValue(createQueryResult());
 
-    const config = { vaultPath: '/tmp' };
+    const config = createPluginConfig();
     const messages = [{ role: 'user', content: 'where are my notes?' }];
 
     await expect(hook({ config, messages })).resolves.toBeUndefined();
@@ -142,14 +181,14 @@ describe('openclaw plugin runtime', () => {
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
 
-  it('disables gracefully for missing or invalid vaultPath', async () => {
+  it('disables gracefully for missing or invalid vault config', async () => {
     const mod = await import('./plugin.js');
     const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
       .before_prompt_build;
     const logger = { warn: vi.fn() };
 
     await expect(hook({ config: {}, logger })).resolves.toBeUndefined();
-    await expect(hook({ config: { vaultPath: 123 }, logger })).resolves.toBeUndefined();
+    await expect(hook({ config: { vaults: 'bad' }, logger })).resolves.toBeUndefined();
 
     expect(rebuildIndexMock).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -168,7 +207,16 @@ describe('openclaw plugin runtime', () => {
     try {
       await expect(
         hook({
-          config: { vaultPath: emptyVaultPath },
+          config: createPluginConfig({
+            vaults: [
+              {
+                name: 'default',
+                description: 'Default vault',
+                vaultPath: emptyVaultPath,
+                mode: 'passive',
+              },
+            ],
+          }),
           messages: [{ role: 'user', content: 'test query' }],
           logger,
         })
@@ -182,7 +230,16 @@ describe('openclaw plugin runtime', () => {
 
       await expect(
         hook({
-          config: { vaultPath: emptyVaultPath },
+          config: createPluginConfig({
+            vaults: [
+              {
+                name: 'default',
+                description: 'Default vault',
+                vaultPath: emptyVaultPath,
+                mode: 'passive',
+              },
+            ],
+          }),
           messages: [{ role: 'user', content: 'test query' }],
           logger,
         })
@@ -201,7 +258,7 @@ describe('openclaw plugin runtime', () => {
     const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
       .before_prompt_build;
 
-    const config = { vaultPath: '/tmp' };
+    const config = createPluginConfig();
     const messages = [
       { role: 'user', content: 'first user' },
       { role: 'assistant', content: 'assistant response' },
@@ -234,7 +291,7 @@ describe('openclaw plugin runtime', () => {
       .before_prompt_build;
 
     const config = {
-      vaultPath: '/tmp',
+      ...createPluginConfig(),
       injection: {
         minScore: 0.77,
         minBm25Score: 0.22,
@@ -269,7 +326,14 @@ describe('openclaw plugin runtime', () => {
         entries: {
           'vault-engine': {
             config: {
-              vaultPath: '/tmp',
+              vaults: [
+                {
+                  name: 'default',
+                  description: 'Default vault',
+                  vaultPath: '/tmp',
+                  mode: 'passive',
+                },
+              ],
             },
           },
         },
@@ -282,6 +346,79 @@ describe('openclaw plugin runtime', () => {
     await hook({ config, messages });
 
     expect(rebuildIndexMock).toHaveBeenCalledWith('/tmp');
+  });
+
+  it('before_prompt_build only queries passive vaults', async () => {
+    const passivePath = await mkdtemp(join(tmpdir(), 'vault-passive-'));
+    const queryOnlyPath = await mkdtemp(join(tmpdir(), 'vault-query-only-'));
+    const passiveIndex = createMockIndex();
+    const queryOnlyIndex = createMockIndex();
+    rebuildIndexMock.mockResolvedValueOnce(passiveIndex).mockResolvedValueOnce(queryOnlyIndex);
+    queryMock.mockReturnValue(createQueryResult({ query: 'only-passive' }));
+
+    const mod = await import('./plugin.js');
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+
+    try {
+      const config = createPluginConfig({
+        vaults: [
+          {
+            name: 'primary',
+            description: 'Primary passive vault',
+            vaultPath: passivePath,
+            mode: 'passive',
+          },
+          {
+            name: 'archive',
+            description: 'Archive query-only vault',
+            vaultPath: queryOnlyPath,
+            mode: 'query-only',
+          },
+        ],
+      });
+      const messages = [{ role: 'user', content: 'passive query' }];
+
+      await hook({ config, messages });
+      await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
+      await hook({ config, messages });
+
+      expect(queryMock).toHaveBeenCalledTimes(1);
+      expect(queryMock).toHaveBeenCalledWith(
+        passiveIndex,
+        'passive query',
+        expect.objectContaining({ maxResults: 3 })
+      );
+    } finally {
+      await rm(passivePath, { recursive: true, force: true });
+      await rm(queryOnlyPath, { recursive: true, force: true });
+    }
+  });
+
+  it('before_prompt_build emits nothing when no passive vault is eligible', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
+    queryMock.mockReturnValue(createQueryResult());
+
+    const mod = await import('./plugin.js');
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+    const config = createPluginConfig({
+      vaults: [
+        {
+          name: 'archive',
+          description: 'Archive query-only vault',
+          vaultPath: '/tmp',
+          mode: 'query-only',
+        },
+      ],
+    });
+
+    await hook({ config, messages: [{ role: 'user', content: 'no passive match' }] });
+    await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
+    const result = await hook({ config, messages: [{ role: 'user', content: 'no passive match' }] });
+
+    expect(result).toBeUndefined();
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
   it('vault_query forwards input and returns QueryResult without transformation', async () => {
@@ -305,11 +442,16 @@ describe('openclaw plugin runtime', () => {
         context: 'recall systems',
       },
       {
-        config: { vaultPath: '/tmp' },
+        config: createPluginConfig(),
       }
     );
 
-    expect(result).toBe(queryResult);
+    expect(result).toEqual(
+      expect.objectContaining({
+        query: 'memory systems',
+        results: queryResult.results,
+      })
+    );
     expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
     expect(queryMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -343,7 +485,7 @@ describe('openclaw plugin runtime', () => {
         query: 'tool-first query',
       },
       {
-        config: { vaultPath: '/tmp' },
+        config: createPluginConfig(),
       }
     );
 
@@ -351,7 +493,7 @@ describe('openclaw plugin runtime', () => {
     expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
 
     await hook({
-      config: { vaultPath: '/tmp' },
+      config: createPluginConfig(),
       messages: [{ role: 'user', content: 'hook query' }],
     });
 
@@ -385,10 +527,17 @@ describe('openclaw plugin runtime', () => {
     const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
       .before_prompt_build;
     const config = {
-      vaultPath: '/tmp',
-      scope: {
-        allowSessionKeys: ['agent:cpto:*'],
-      },
+      vaults: [
+        {
+          name: 'default',
+          description: 'Default vault',
+          vaultPath: '/tmp',
+          mode: 'passive',
+          scope: {
+            allowSessionKeys: ['agent:cpto:*'],
+          },
+        },
+      ],
     };
     const messages = [{ role: 'user', content: 'scope query' }];
 
@@ -424,6 +573,7 @@ describe('openclaw plugin runtime', () => {
   });
 
   it('vault_query refuses when session is out of scope', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
     const mod = await import('./plugin.js');
     const registerTool = vi.fn();
     (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
@@ -439,21 +589,29 @@ describe('openclaw plugin runtime', () => {
         },
         {
           config: {
-            vaultPath: '/tmp',
-            scope: {
-              allowSessionKeys: ['agent:cpto:*'],
-            },
+            vaults: [
+              {
+                name: 'default',
+                description: 'Default vault',
+                vaultPath: '/tmp',
+                mode: 'passive',
+                scope: {
+                  allowSessionKeys: ['agent:cpto:*'],
+                },
+              },
+            ],
           },
           sessionKey: 'agent:finance:slack:prod',
         }
       )
     ).rejects.toThrow('vault_query unavailable: current session is out of scope');
 
-    expect(rebuildIndexMock).not.toHaveBeenCalled();
+    expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
     expect(queryMock).not.toHaveBeenCalled();
   });
 
   it('vault_query refuses when session key cannot be resolved and scope rules exist', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
     const mod = await import('./plugin.js');
     const registerTool = vi.fn();
     (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
@@ -469,17 +627,96 @@ describe('openclaw plugin runtime', () => {
         },
         {
           config: {
-            vaultPath: '/tmp',
-            scope: {
-              allowSessionKeys: ['agent:cpto:*'],
-            },
+            vaults: [
+              {
+                name: 'default',
+                description: 'Default vault',
+                vaultPath: '/tmp',
+                mode: 'passive',
+                scope: {
+                  allowSessionKeys: ['agent:cpto:*'],
+                },
+              },
+            ],
           },
         }
       )
     ).rejects.toThrow('vault_query unavailable: session key is required when scope rules are configured');
 
-    expect(rebuildIndexMock).not.toHaveBeenCalled();
+    expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
     expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('vault_query searches all eligible vaults by default and supports explicit vault targeting', async () => {
+    const passivePath = await mkdtemp(join(tmpdir(), 'vault-tool-passive-'));
+    const queryOnlyPath = await mkdtemp(join(tmpdir(), 'vault-tool-query-only-'));
+    const passiveIndex = createMockIndex();
+    const queryOnlyIndex = createMockIndex();
+    rebuildIndexMock.mockResolvedValueOnce(passiveIndex).mockResolvedValueOnce(queryOnlyIndex);
+    queryMock.mockReturnValue(createQueryResult({ query: 'distributed query' }));
+
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+    const config = createPluginConfig({
+      vaults: [
+        {
+          name: 'primary',
+          description: 'Primary passive vault',
+          vaultPath: passivePath,
+          mode: 'passive',
+        },
+        {
+          name: 'archive',
+          description: 'Archive query-only vault',
+          vaultPath: queryOnlyPath,
+          mode: 'query-only',
+          scope: {
+            allowSessionKeys: ['agent:cpto:*'],
+          },
+        },
+      ],
+    });
+
+    try {
+      await tool.execute(
+        'req-all-vaults',
+        {
+          query: 'distributed query',
+        },
+        {
+          config,
+          sessionKey: 'agent:cpto:slack:prod',
+        }
+      );
+
+      expect(queryMock).toHaveBeenCalledTimes(2);
+      expect(queryMock).toHaveBeenNthCalledWith(1, passiveIndex, 'distributed query', expect.any(Object));
+      expect(queryMock).toHaveBeenNthCalledWith(2, queryOnlyIndex, 'distributed query', expect.any(Object));
+
+      queryMock.mockClear();
+
+      await tool.execute(
+        'req-specific-vault',
+        {
+          query: 'archive only',
+          vault: 'archive',
+        },
+        {
+          config,
+          sessionKey: 'agent:cpto:slack:prod',
+        }
+      );
+
+      expect(queryMock).toHaveBeenCalledTimes(1);
+      expect(queryMock).toHaveBeenCalledWith(queryOnlyIndex, 'archive only', expect.any(Object));
+    } finally {
+      await rm(passivePath, { recursive: true, force: true });
+      await rm(queryOnlyPath, { recursive: true, force: true });
+    }
   });
 
   it('missing config call does not permanently disable later valid tool initialization', async () => {
@@ -505,11 +742,16 @@ describe('openclaw plugin runtime', () => {
         query: 'recovered',
       },
       {
-        config: { vaultPath: '/tmp' },
+        config: createPluginConfig(),
       }
     );
 
-    expect(result).toBe(queryResult);
+    expect(result).toEqual(
+      expect.objectContaining({
+        query: 'recovered',
+        results: queryResult.results,
+      })
+    );
     expect(rebuildIndexMock).toHaveBeenCalledTimes(1);
     expect(mod.__testing.getState()).toBe('ready');
   });
