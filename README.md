@@ -76,6 +76,8 @@ Install the plugin package:
 npm install @ghostwater/vault-engine-openclaw
 ```
 
+`vault openclaw install` only writes config values under `plugins.entries.vault-engine.config` and scope rules. It does **not** install the plugin package or configure OpenClaw plugin discovery — do that separately.
+
 Configure OpenClaw to load the plugin and provide `vaultPath`:
 
 Bootstrap or update `openclaw.json` from the CLI:
@@ -98,26 +100,18 @@ vault openclaw install \
   --dry-run
 ```
 
-Resulting config shape:
+Resulting config shape (written fields only):
 
 ```json
 {
   "plugins": {
     "entries": {
       "vault-engine": {
-        "enabled": true,
-        "package": "@ghostwater/vault-engine-openclaw",
         "config": {
           "vaultPath": "/home/you/projects/abidan-vault",
           "scope": {
             "allowSessionKeys": ["agent:cpto:slack:prod", "agent:cpto:*"],
             "denySessionKeys": ["agent:cpto:slack:sandbox:*"]
-          },
-          "injection": {
-            "maxResults": 3,
-            "maxTokens": 1500,
-            "minScore": 0.3,
-            "minBm25Score": 0.1
           }
         }
       }
@@ -125,6 +119,8 @@ Resulting config shape:
   }
 }
 ```
+
+> **Note**: The `package` field for plugin discovery is **not** written by this command. Configure OpenClaw plugin loading separately per OpenClaw documentation.
 
 Behavior:
 - Uses `before_prompt_build` to inject retrieval context automatically.

@@ -18,7 +18,6 @@ const DRY_RUN_PER_RESULT_TOKEN_BUDGET = 400;
 const DRY_RUN_MAX_RESULTS = 3;
 const AVG_CHARS_PER_TOKEN = 4;
 const OPENCLAW_PLUGIN_ENTRY_KEY = "vault-engine";
-const DEFAULT_OPENCLAW_PLUGIN_PACKAGE = "@ghostwater/vault-engine-openclaw";
 const DEFAULT_OPENCLAW_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 const VALID_NOTE_TYPES = [
   "experience",
@@ -202,7 +201,6 @@ async function readOpenClawConfig(path: string): Promise<Record<string, unknown>
 function applyOpenClawPluginConfigUpdate(
   inputConfig: Record<string, unknown>,
   update: {
-    packageName: string;
     vaultPath: string;
     allowSessionKeys: string[];
     denySessionKeys: string[];
@@ -213,8 +211,8 @@ function applyOpenClawPluginConfigUpdate(
   const plugins = ensureRecord(next, "plugins");
   const entries = ensureRecord(plugins, "entries");
   const entry = ensureRecord(entries, OPENCLAW_PLUGIN_ENTRY_KEY);
-  entry.enabled = true;
-  entry.package = update.packageName;
+  delete entry.package;
+  delete entry.enabled;
 
   const entryConfig = ensureRecord(entry, "config");
   entryConfig.vaultPath = update.vaultPath;
@@ -440,7 +438,6 @@ async function handleOpenClawInstall(
   options: {
     config?: string;
     vaultPath?: string;
-    package?: string;
     allow: string[];
     deny: string[];
     dryRun?: boolean;
@@ -457,7 +454,6 @@ async function handleOpenClawInstall(
   const configPath = resolveOpenClawConfigPath(options.config);
   const currentConfig = await readOpenClawConfig(configPath);
   const nextConfig = applyOpenClawPluginConfigUpdate(currentConfig, {
-    packageName: options.package ?? DEFAULT_OPENCLAW_PLUGIN_PACKAGE,
     vaultPath: resolve(parseNonEmptyString(resolvedVaultPath)),
     allowSessionKeys: options.allow.map(parseNonEmptyString),
     denySessionKeys: options.deny.map(parseNonEmptyString),
@@ -505,7 +501,9 @@ Implemented index subcommands:
   index rebuild
 
 Implemented OpenClaw subcommands:
-  openclaw install --config <path> --vault-path <path> [--allow <session-key>] [--deny <session-key>] [--dry-run] [--print]`
+  openclaw install --config <path> --vault-path <path> [--allow <session-key>] [--deny <session-key>] [--dry-run] [--print]
+    Writes config values under plugins.entries.vault-engine.config and scope rules only.
+    Does NOT install the plugin package or configure OpenClaw plugin discovery — do that separately.`
   );
 
   program
@@ -539,10 +537,9 @@ Implemented OpenClaw subcommands:
 
   openClawCommand
     .command("install")
-    .description("Create or update OpenClaw plugin config for vault-engine")
+    .description("Write config values under plugins.entries.vault-engine.config and scope rules (does not install the package or configure plugin discovery)")
     .option("--config <path>", "Path to openclaw.json", DEFAULT_OPENCLAW_CONFIG_PATH)
     .option("--vault-path <path>", "Vault path for plugins.entries.vault-engine.config.vaultPath")
-    .option("--package <name>", "Plugin package name", DEFAULT_OPENCLAW_PLUGIN_PACKAGE)
     .option(
       "--allow <session-key>",
       "Append a session-key allow rule (repeat flag to add multiple)",
