@@ -377,6 +377,111 @@ describe('openclaw plugin runtime', () => {
     );
   });
 
+  it('before_prompt_build enforces session-key scope and no-ops when unresolved', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
+    queryMock.mockReturnValue(createQueryResult());
+
+    const mod = await import('./plugin.js');
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+    const config = {
+      vaultPath: '/tmp',
+      scope: {
+        allowSessionKeys: ['agent:cpto:*'],
+      },
+    };
+    const messages = [{ role: 'user', content: 'scope query' }];
+
+    await hook({
+      config,
+      messages,
+      sessionKey: 'agent:cpto:slack:prod',
+    });
+    await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
+    await hook({
+      config,
+      messages,
+      sessionKey: 'agent:cpto:slack:prod',
+    });
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
+
+    await expect(
+      hook({
+        config,
+        messages,
+        sessionKey: 'agent:finance:slack:prod',
+      })
+    ).resolves.toBeUndefined();
+    await expect(
+      hook({
+        config,
+        messages,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('vault_query refuses when session is out of scope', async () => {
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+
+    await expect(
+      tool.execute(
+        'req-out-of-scope',
+        {
+          query: 'should fail',
+        },
+        {
+          config: {
+            vaultPath: '/tmp',
+            scope: {
+              allowSessionKeys: ['agent:cpto:*'],
+            },
+          },
+          sessionKey: 'agent:finance:slack:prod',
+        }
+      )
+    ).rejects.toThrow('vault_query unavailable: current session is out of scope');
+
+    expect(rebuildIndexMock).not.toHaveBeenCalled();
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('vault_query refuses when session key cannot be resolved and scope rules exist', async () => {
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+
+    await expect(
+      tool.execute(
+        'req-missing-session',
+        {
+          query: 'should fail',
+        },
+        {
+          config: {
+            vaultPath: '/tmp',
+            scope: {
+              allowSessionKeys: ['agent:cpto:*'],
+            },
+          },
+        }
+      )
+    ).rejects.toThrow('vault_query unavailable: session key is required when scope rules are configured');
+
+    expect(rebuildIndexMock).not.toHaveBeenCalled();
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
   it('missing config call does not permanently disable later valid tool initialization', async () => {
     rebuildIndexMock.mockResolvedValue(createMockIndex());
     const queryResult = createQueryResult({ query: 'recovered' });

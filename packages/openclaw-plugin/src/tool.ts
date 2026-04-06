@@ -2,7 +2,9 @@ import type { QueryResult } from '@ghostwater/vault-engine';
 
 import {
   ensureEngineReady,
+  evaluateSessionKeyScope,
   parseConfig,
+  resolveSessionKey,
   runToolQuery,
   disableForMissingConfig,
 } from './runtime.js';
@@ -21,6 +23,9 @@ interface VaultQueryToolInput {
 interface ToolExecutionContext {
   config?: unknown;
   logger?: Logger;
+  sessionKey?: string;
+  session?: { key?: string };
+  runtime?: { sessionKey?: string };
 }
 
 interface ToolDefinition {
@@ -60,6 +65,14 @@ export function registerVaultQueryTool(api: ToolRegisterApi): void {
       if (!config) {
         disableForMissingConfig(context?.logger);
         throw new Error('vault_query requires a valid plugin config with vaultPath');
+      }
+
+      const sessionScopeDecision = evaluateSessionKeyScope(config.scope, resolveSessionKey(context));
+      if (!sessionScopeDecision.inScope) {
+        if (sessionScopeDecision.reason === 'missing-session-key') {
+          throw new Error('vault_query unavailable: session key is required when scope rules are configured');
+        }
+        throw new Error('vault_query unavailable: current session is out of scope');
       }
 
       const index = await ensureEngineReady(config, context?.logger);
