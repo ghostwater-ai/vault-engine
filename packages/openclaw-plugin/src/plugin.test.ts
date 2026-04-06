@@ -889,6 +889,49 @@ describe('openclaw plugin runtime', () => {
     }
   });
 
+  it('vault_query rejects whitespace-only explicit vault targeting', async () => {
+    const primaryPath = await mkdtemp(join(tmpdir(), 'vault-tool-whitespace-'));
+    const primaryIndex = createMockIndex();
+    rebuildIndexMock.mockResolvedValueOnce(primaryIndex);
+    queryMock.mockReturnValue(createQueryResult({ query: 'whitespace vault' }));
+
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+    const config = createPluginConfig({
+      vaults: [
+        {
+          name: 'primary',
+          description: 'Primary vault',
+          vaultPath: primaryPath,
+          mode: 'passive',
+        },
+      ],
+    });
+
+    try {
+      await expect(
+        tool.execute(
+          'req-whitespace-vault',
+          {
+            query: 'whitespace vault',
+            vault: '   ',
+          },
+          {
+            config,
+          }
+        )
+      ).rejects.toThrow('vault_query unavailable: unknown vault "   "');
+
+      expect(queryMock).not.toHaveBeenCalled();
+    } finally {
+      await rm(primaryPath, { recursive: true, force: true });
+    }
+  });
+
   it('missing config call does not permanently disable later valid tool initialization', async () => {
     rebuildIndexMock.mockResolvedValue(createMockIndex());
     const queryResult = createQueryResult({ query: 'recovered' });

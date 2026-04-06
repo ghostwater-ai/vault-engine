@@ -59,7 +59,7 @@ export function registerVaultQueryTool(api: ToolRegisterApi): void {
           items: { type: 'string' },
         },
         context: { type: 'string' },
-        vault: { type: 'string', minLength: 1 },
+        vault: { type: 'string', minLength: 1, pattern: '\\S' },
       },
     },
     async execute(_requestId: string, input: VaultQueryToolInput, context?: ToolExecutionContext): Promise<QueryResult> {

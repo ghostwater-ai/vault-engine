@@ -575,7 +575,12 @@ export function getEligibleVaultsForTool(
   sessionKey: string | undefined,
   requestedVaultName?: string
 ): { vaults: ReadyVaultEngine[]; reason?: SessionScopeDecision['reason'] | 'vault-not-found' } {
+  const hasExplicitVaultTarget = typeof requestedVaultName === 'string';
   const normalizedName = requestedVaultName?.trim();
+  if (hasExplicitVaultTarget && !normalizedName) {
+    return { vaults: [], reason: 'vault-not-found' };
+  }
+
   if (normalizedName) {
     const matchingVault = readyVaults.find((readyVault) => readyVault.vault.name === normalizedName);
     if (!matchingVault) {
