@@ -78,6 +78,28 @@ npm install @ghostwater/vault-engine-openclaw
 
 Configure OpenClaw to load the plugin and provide `vaultPath`:
 
+Bootstrap or update `openclaw.json` from the CLI:
+
+```bash
+vault openclaw install \
+  --config ~/.openclaw/openclaw.json \
+  --vault-path ~/projects/abidan-vault \
+  --allow agent:cpto:* \
+  --deny agent:cpto:slack:sandbox:*
+```
+
+Preview the exact resulting JSON without writing:
+
+```bash
+vault openclaw install \
+  --config ~/.openclaw/openclaw.json \
+  --vault-path ~/projects/abidan-vault \
+  --allow agent:cpto:* \
+  --dry-run
+```
+
+Resulting config shape:
+
 ```json
 {
   "plugins": {
