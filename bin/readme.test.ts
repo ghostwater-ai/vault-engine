@@ -17,6 +17,8 @@ describe("README usage docs", () => {
 
   it("documents OpenClaw plugin configuration with vaultPath", () => {
     expect(readme).toContain("## OpenClaw Plugin Config");
+    expect(readme).toContain("vault openclaw install");
+    expect(readme).toContain("--dry-run");
     expect(readme).toContain('"vault-engine"');
     expect(readme).toContain('"vaultPath"');
     expect(readme).toContain('"@ghostwater/vault-engine-openclaw"');

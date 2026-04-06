@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { execSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -204,6 +204,274 @@ describe("vault CLI", () => {
     expect(output).toContain("--dry-run");
     expect(output).toContain("index stats");
     expect(output).toContain("index rebuild");
+    expect(output).toContain("openclaw");
+    expect(output).toContain("openclaw install");
+    expect(output).toContain("--config <path>");
+    expect(output).toContain("--allow <session-key>");
+    expect(output).toContain("--deny <session-key>");
+  });
+
+  it("vault openclaw install bootstraps missing openclaw.json with plugin entry and config", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-bootstrap-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/abidan-vault" --allow "agent:cpto:*" --deny "agent:cpto:slack:sandbox:*"`
+      );
+
+      const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as {
+        plugins: {
+          entries: {
+            "vault-engine": {
+              enabled: boolean;
+              package: string;
+              config: {
+                vaultPath: string;
+                scope: {
+                  allowSessionKeys: string[];
+                  denySessionKeys: string[];
+                };
+              };
+            };
+          };
+        };
+      };
+
+      const entry = parsed.plugins.entries["vault-engine"];
+      expect(entry.enabled).toBe(true);
+      expect(entry.package).toBe("@ghostwater/vault-engine-openclaw");
+      expect(entry.config.vaultPath).toBe("/tmp/abidan-vault");
+      expect(entry.config.scope.allowSessionKeys).toEqual(["agent:cpto:*"]);
+      expect(entry.config.scope.denySessionKeys).toEqual(["agent:cpto:slack:sandbox:*"]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install updates package/vaultPath and preserves unrelated config fields", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-update-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          {
+            telemetry: {
+              enabled: true,
+            },
+            plugins: {
+              entries: {
+                "vault-engine": {
+                  enabled: false,
+                  package: "legacy-package",
+                  config: {
+                    vaultPath: "/tmp/old-vault",
+                    scope: {
+                      allowSessionKeys: ["agent:cpto:*"],
+                      denySessionKeys: [],
+                    },
+                    injection: {
+                      maxResults: 2,
+                    },
+                  },
+                },
+                "another-plugin": {
+                  enabled: true,
+                },
+              },
+            },
+          },
+          null,
+          2
+        ),
+        "utf-8"
+      );
+
+      runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/new-vault" --package "@ghostwater/vault-engine-openclaw"`
+      );
+
+      const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as {
+        telemetry: { enabled: boolean };
+        plugins: {
+          entries: {
+            "vault-engine": {
+              enabled: boolean;
+              package: string;
+              config: {
+                vaultPath: string;
+                injection: { maxResults: number };
+              };
+            };
+            "another-plugin": { enabled: boolean };
+          };
+        };
+      };
+
+      expect(parsed.telemetry.enabled).toBe(true);
+      expect(parsed.plugins.entries["another-plugin"].enabled).toBe(true);
+      expect(parsed.plugins.entries["vault-engine"].enabled).toBe(true);
+      expect(parsed.plugins.entries["vault-engine"].package).toBe("@ghostwater/vault-engine-openclaw");
+      expect(parsed.plugins.entries["vault-engine"].config.vaultPath).toBe("/tmp/new-vault");
+      expect(parsed.plugins.entries["vault-engine"].config.injection.maxResults).toBe(2);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install resolves relative vault path to an absolute path in config", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-relative-vault-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      runCli(`openclaw install --config "${configPath}" --vault-path "./vault"`);
+
+      const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as {
+        plugins: {
+          entries: {
+            "vault-engine": {
+              config: {
+                vaultPath: string;
+              };
+            };
+          };
+        };
+      };
+
+      expect(parsed.plugins.entries["vault-engine"].config.vaultPath).toBe(resolve(rootDir, "vault"));
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install appends allow/deny rules idempotently without duplicates", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-idempotent-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --allow "agent:cpto:*" --deny "agent:cpto:slack:sandbox:*"`
+      );
+      runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --deny "agent:cpto:slack:sandbox:*"`
+      );
+
+      const parsed = JSON.parse(readFileSync(configPath, "utf-8")) as {
+        plugins: {
+          entries: {
+            "vault-engine": {
+              config: {
+                scope: {
+                  allowSessionKeys: string[];
+                  denySessionKeys: string[];
+                };
+              };
+            };
+          };
+        };
+      };
+
+      expect(parsed.plugins.entries["vault-engine"].config.scope.allowSessionKeys).toEqual([
+        "agent:cpto:*",
+      ]);
+      expect(parsed.plugins.entries["vault-engine"].config.scope.denySessionKeys).toEqual([
+        "agent:cpto:slack:sandbox:*",
+      ]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install --dry-run prints resulting config and does not write file", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-dry-run-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      const output = runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --dry-run`
+      );
+
+      expect(output).toContain('"vault-engine"');
+      expect(output).toContain('"vaultPath": "/tmp/vault"');
+      expect(output).toContain('"allowSessionKeys": [');
+      expect(existsSync(configPath)).toBe(false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install --print writes config and prints resulting JSON", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-print-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      const output = runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --print`
+      );
+
+      const written = JSON.parse(readFileSync(configPath, "utf-8")) as {
+        plugins: {
+          entries: {
+            "vault-engine": {
+              config: {
+                vaultPath: string;
+                scope: {
+                  allowSessionKeys: string[];
+                };
+              };
+            };
+          };
+        };
+      };
+
+      expect(output).toContain('"vault-engine"');
+      expect(output).toContain('"vaultPath": "/tmp/vault"');
+      expect(written.plugins.entries["vault-engine"].config.vaultPath).toBe("/tmp/vault");
+      expect(written.plugins.entries["vault-engine"].config.scope.allowSessionKeys).toEqual([
+        "agent:cpto:*",
+      ]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install reports no changes needed when rerun with same inputs", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-no-change-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --deny "agent:cpto:slack:sandbox:*"`
+      );
+
+      const output = runCli(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault" --allow "agent:cpto:*" --deny "agent:cpto:slack:sandbox:*"`
+      );
+
+      expect(output).toContain(`No changes needed: ${configPath}`);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("vault openclaw install fails with helpful message when openclaw.json is invalid JSON", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vault-engine-openclaw-invalid-json-"));
+    const configPath = join(tempDir, "openclaw.json");
+
+    try {
+      writeFileSync(configPath, "{invalid-json", "utf-8");
+
+      const result = runCliResult(
+        `openclaw install --config "${configPath}" --vault-path "/tmp/vault"`
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`Failed to read OpenClaw config at ${configPath}:`);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("CLI errors with helpful message when vault path is missing", () => {

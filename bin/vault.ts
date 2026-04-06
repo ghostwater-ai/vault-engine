@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import { Command, InvalidArgumentError } from "commander";
-import { resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
 import process from "node:process";
 import {
   DEFAULT_QUERY_OPTIONS,
@@ -15,6 +17,9 @@ const DRY_RUN_TOTAL_TOKEN_BUDGET = 1500;
 const DRY_RUN_PER_RESULT_TOKEN_BUDGET = 400;
 const DRY_RUN_MAX_RESULTS = 3;
 const AVG_CHARS_PER_TOKEN = 4;
+const OPENCLAW_PLUGIN_ENTRY_KEY = "vault-engine";
+const DEFAULT_OPENCLAW_PLUGIN_PACKAGE = "@ghostwater/vault-engine-openclaw";
+const DEFAULT_OPENCLAW_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 const VALID_NOTE_TYPES = [
   "experience",
   "research",
@@ -40,6 +45,19 @@ function parsePositiveInteger(value: string): number {
     throw new InvalidArgumentError(`Expected a positive integer, received: ${value}`);
   }
   return parsed;
+}
+
+function parseNonEmptyString(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new InvalidArgumentError("Expected a non-empty value.");
+  }
+
+  return normalized;
+}
+
+function collectStringValues(value: string, previous: string[]): string[] {
+  return [...previous, parseNonEmptyString(value)];
 }
 
 function parseScore(value: string): number {
@@ -97,6 +115,117 @@ function resolveVaultPath(vaultPathOverride: string | undefined): string {
   }
 
   return resolve(selectedPath);
+}
+
+function resolveOpenClawConfigPath(configPathOverride: string | undefined): string {
+  if (!configPathOverride) {
+    return DEFAULT_OPENCLAW_CONFIG_PATH;
+  }
+
+  return resolve(configPathOverride);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function ensureRecord(parent: Record<string, unknown>, key: string): Record<string, unknown> {
+  const existing = parent[key];
+  if (isRecord(existing)) {
+    return existing;
+  }
+
+  const next: Record<string, unknown> = {};
+  parent[key] = next;
+  return next;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+    const trimmed = item.trim();
+    if (!trimmed || normalized.includes(trimmed)) {
+      continue;
+    }
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
+function appendUnique(base: string[], values: string[]): string[] {
+  const next = [...base];
+  for (const value of values) {
+    if (!next.includes(value)) {
+      next.push(value);
+    }
+  }
+  return next;
+}
+
+function renderJson(value: Record<string, unknown>): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+async function readOpenClawConfig(path: string): Promise<Record<string, unknown>> {
+  try {
+    const raw = await readFile(path, "utf-8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) {
+      throw new Error("OpenClaw config root must be a JSON object.");
+    }
+    return parsed;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return {};
+    }
+
+    if (error instanceof Error) {
+      throw new Error(`Failed to read OpenClaw config at ${path}: ${error.message}`);
+    }
+    throw error;
+  }
+}
+
+function applyOpenClawPluginConfigUpdate(
+  inputConfig: Record<string, unknown>,
+  update: {
+    packageName: string;
+    vaultPath: string;
+    allowSessionKeys: string[];
+    denySessionKeys: string[];
+  }
+): Record<string, unknown> {
+  const next = structuredClone(inputConfig);
+
+  const plugins = ensureRecord(next, "plugins");
+  const entries = ensureRecord(plugins, "entries");
+  const entry = ensureRecord(entries, OPENCLAW_PLUGIN_ENTRY_KEY);
+  entry.enabled = true;
+  entry.package = update.packageName;
+
+  const entryConfig = ensureRecord(entry, "config");
+  entryConfig.vaultPath = update.vaultPath;
+
+  const scope = ensureRecord(entryConfig, "scope");
+  const allowSessionKeys = toStringArray(scope.allowSessionKeys);
+  const denySessionKeys = toStringArray(scope.denySessionKeys);
+  scope.allowSessionKeys = appendUnique(allowSessionKeys, update.allowSessionKeys);
+  scope.denySessionKeys = appendUnique(denySessionKeys, update.denySessionKeys);
+
+  return next;
 }
 
 function formatResultLine(result: (Awaited<ReturnType<typeof query>>) ["results"][number]): string {
@@ -307,6 +436,50 @@ async function handleIndexRebuild(command: Command): Promise<void> {
   console.log(renderIndexStats(index));
 }
 
+async function handleOpenClawInstall(
+  options: {
+    config?: string;
+    vaultPath?: string;
+    package?: string;
+    allow: string[];
+    deny: string[];
+    dryRun?: boolean;
+    print?: boolean;
+  },
+  command: Command
+): Promise<void> {
+  const globalOptions = command.parent?.parent?.opts<{ vaultPath?: string }>() ?? {};
+  const resolvedVaultPath = options.vaultPath ?? globalOptions.vaultPath;
+  if (!resolvedVaultPath) {
+    throw new Error("OpenClaw vault path is required. Provide --vault-path <path>.");
+  }
+
+  const configPath = resolveOpenClawConfigPath(options.config);
+  const currentConfig = await readOpenClawConfig(configPath);
+  const nextConfig = applyOpenClawPluginConfigUpdate(currentConfig, {
+    packageName: options.package ?? DEFAULT_OPENCLAW_PLUGIN_PACKAGE,
+    vaultPath: resolve(parseNonEmptyString(resolvedVaultPath)),
+    allowSessionKeys: options.allow.map(parseNonEmptyString),
+    denySessionKeys: options.deny.map(parseNonEmptyString),
+  });
+
+  const currentOutput = renderJson(currentConfig);
+  const nextOutput = renderJson(nextConfig);
+  const changed = currentOutput !== nextOutput;
+
+  if (!options.dryRun && changed) {
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, nextOutput, "utf-8");
+  }
+
+  if (options.dryRun || options.print) {
+    console.log(nextOutput.trimEnd());
+    return;
+  }
+
+  console.log(changed ? `Updated ${configPath}` : `No changes needed: ${configPath}`);
+}
+
 async function main(): Promise<void> {
   const program = new Command();
 
@@ -329,7 +502,10 @@ Implemented query flags:
 
 Implemented index subcommands:
   index stats
-  index rebuild`
+  index rebuild
+
+Implemented OpenClaw subcommands:
+  openclaw install --config <path> --vault-path <path> [--allow <session-key>] [--deny <session-key>] [--dry-run] [--print]`
   );
 
   program
@@ -356,6 +532,32 @@ Implemented index subcommands:
     .command("stats")
     .description("Show index statistics")
     .action((_, command) => handleIndexStats(command));
+
+  const openClawCommand = program
+    .command("openclaw")
+    .description("OpenClaw plugin config bootstrap and update commands");
+
+  openClawCommand
+    .command("install")
+    .description("Create or update OpenClaw plugin config for vault-engine")
+    .option("--config <path>", "Path to openclaw.json", DEFAULT_OPENCLAW_CONFIG_PATH)
+    .option("--vault-path <path>", "Vault path for plugins.entries.vault-engine.config.vaultPath")
+    .option("--package <name>", "Plugin package name", DEFAULT_OPENCLAW_PLUGIN_PACKAGE)
+    .option(
+      "--allow <session-key>",
+      "Append a session-key allow rule (repeat flag to add multiple)",
+      collectStringValues,
+      []
+    )
+    .option(
+      "--deny <session-key>",
+      "Append a session-key deny rule (repeat flag to add multiple)",
+      collectStringValues,
+      []
+    )
+    .option("--dry-run", "Print resulting config JSON without writing to disk")
+    .option("--print", "Print resulting config JSON after applying changes")
+    .action((options, command) => handleOpenClawInstall(options, command));
 
   try {
     await program.parseAsync(process.argv);
