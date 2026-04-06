@@ -16,9 +16,15 @@ interface InjectionConfig {
   minBm25Score: number;
 }
 
+interface ScopeConfig {
+  allowSessionKeys: string[];
+  denySessionKeys: string[];
+}
+
 export interface PluginConfig {
   vaultPath: string;
   injection: InjectionConfig;
+  scope: ScopeConfig;
 }
 
 export interface HookMessage {
@@ -39,6 +45,11 @@ const DEFAULT_INJECTION_CONFIG: InjectionConfig = {
   minBm25Score: 0.1,
 };
 
+const DEFAULT_SCOPE_CONFIG: ScopeConfig = {
+  allowSessionKeys: [],
+  denySessionKeys: [],
+};
+
 const FIXED_QUERY_MAX_RESULTS = 3;
 
 const warnedKeys = new Set<string>();
@@ -50,6 +61,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function toFiniteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function toPatternList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const values: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      continue;
+    }
+
+    const normalized = item.trim();
+    if (!normalized) {
+      continue;
+    }
+
+    values.push(normalized);
+  }
+
+  return values;
 }
 
 function normalizePath(vaultPath: string): string {
@@ -126,6 +159,7 @@ export function parseConfig(input: unknown): PluginConfig | undefined {
   }
 
   const injectionInput = isRecord(resolved.injection) ? resolved.injection : {};
+  const scopeInput = isRecord(resolved.scope) ? resolved.scope : {};
   const config: PluginConfig = {
     vaultPath: normalizePath(rawVaultPath.trim()),
     injection: {
@@ -134,9 +168,92 @@ export function parseConfig(input: unknown): PluginConfig | undefined {
       minScore: toFiniteNumber(injectionInput.minScore, DEFAULT_INJECTION_CONFIG.minScore),
       minBm25Score: toFiniteNumber(injectionInput.minBm25Score, DEFAULT_INJECTION_CONFIG.minBm25Score),
     },
+    scope: {
+      allowSessionKeys: toPatternList(scopeInput.allowSessionKeys ?? DEFAULT_SCOPE_CONFIG.allowSessionKeys),
+      denySessionKeys: toPatternList(scopeInput.denySessionKeys ?? DEFAULT_SCOPE_CONFIG.denySessionKeys),
+    },
   };
 
   return config;
+}
+
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
+
+function findMatchingPattern(patterns: string[], sessionKey: string): string | undefined {
+  for (const pattern of patterns) {
+    if (globToRegExp(pattern).test(sessionKey)) {
+      return pattern;
+    }
+  }
+
+  return undefined;
+}
+
+export type SessionScopeDecision =
+  | { inScope: true; reason: 'no-scope-rules' | 'allowed-by-rule' | 'default-allow-no-allowlist'; matchedPattern?: string }
+  | { inScope: false; reason: 'missing-session-key' | 'denied-by-rule' | 'default-deny-allowlist'; matchedPattern?: string };
+
+export function evaluateSessionKeyScope(scope: ScopeConfig, sessionKey: string | undefined): SessionScopeDecision {
+  const hasAllowRules = scope.allowSessionKeys.length > 0;
+  const hasDenyRules = scope.denySessionKeys.length > 0;
+  if (!hasAllowRules && !hasDenyRules) {
+    return { inScope: true, reason: 'no-scope-rules' };
+  }
+
+  if (!sessionKey) {
+    return { inScope: false, reason: 'missing-session-key' };
+  }
+
+  const denyMatch = findMatchingPattern(scope.denySessionKeys, sessionKey);
+  if (denyMatch) {
+    return { inScope: false, reason: 'denied-by-rule', matchedPattern: denyMatch };
+  }
+
+  if (hasAllowRules) {
+    const allowMatch = findMatchingPattern(scope.allowSessionKeys, sessionKey);
+    if (!allowMatch) {
+      return { inScope: false, reason: 'default-deny-allowlist' };
+    }
+    return { inScope: true, reason: 'allowed-by-rule', matchedPattern: allowMatch };
+  }
+
+  return { inScope: true, reason: 'default-allow-no-allowlist' };
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
+}
+
+export function resolveSessionKey(input: unknown): string | undefined {
+  if (!isRecord(input)) {
+    return undefined;
+  }
+
+  const directSessionKey = asNonEmptyString(input.sessionKey);
+  if (directSessionKey) {
+    return directSessionKey;
+  }
+
+  const session = input.session;
+  if (isRecord(session)) {
+    const sessionKey = asNonEmptyString(session.key);
+    if (sessionKey) {
+      return sessionKey;
+    }
+  }
+
+  const runtime = input.runtime;
+  if (isRecord(runtime)) {
+    const runtimeSessionKey = asNonEmptyString(runtime.sessionKey);
+    if (runtimeSessionKey) {
+      return runtimeSessionKey;
+    }
+  }
+
+  return undefined;
 }
 
 function messageContentToText(content: unknown): string {

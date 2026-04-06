@@ -5,9 +5,11 @@ import {
   __testing as runtimeTesting,
   beginEngineInitialization,
   disableForMissingConfig,
+  evaluateSessionKeyScope,
   getReadyEngineIndex,
   getUserMessages,
   parseConfig,
+  resolveSessionKey,
   runPassiveQuery,
 } from './runtime.js';
 import { registerVaultQueryTool } from './tool.js';
@@ -25,6 +27,9 @@ interface BeforePromptBuildArgs {
   messages?: HookMessage[];
   config?: unknown;
   logger?: Logger;
+  sessionKey?: string;
+  session?: { key?: string };
+  runtime?: { sessionKey?: string };
 }
 
 interface HookResult {
@@ -35,6 +40,11 @@ async function beforePromptBuild(args: BeforePromptBuildArgs): Promise<HookResul
   const config = parseConfig(args.config);
   if (!config) {
     disableForMissingConfig(args.logger);
+    return;
+  }
+
+  const sessionScopeDecision = evaluateSessionKeyScope(config.scope, resolveSessionKey(args));
+  if (!sessionScopeDecision.inScope) {
     return;
   }
 
@@ -87,6 +97,20 @@ const configSchema = {
         maxTokens: { type: 'integer', minimum: 1 },
         minScore: { type: 'number' },
         minBm25Score: { type: 'number' },
+      },
+    },
+    scope: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        allowSessionKeys: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+        },
+        denySessionKeys: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+        },
       },
     },
   },
