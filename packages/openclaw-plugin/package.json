@@ -24,8 +24,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "tsc --build --clean"
+    "build": "tsc --build && node build.mjs",
+    "clean": "tsc --build --clean",
+    "prepack": "node prepack.mjs",
+    "postpack": "node postpack.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -37,7 +39,14 @@
     "directory": "packages/openclaw-plugin"
   },
   "dependencies": {
-    "@ghostwater/vault-engine": "workspace:*"
+    "chokidar": "^5.0.0",
+    "gray-matter": "^4.0.3",
+    "minisearch": "^7.2.0",
+    "stemmer": "^2.0.1"
+  },
+  "devDependencies": {
+    "@ghostwater/vault-engine": "workspace:*",
+    "esbuild": "^0.25.0"
   },
   "peerDependencies": {
     "openclaw": "*"
