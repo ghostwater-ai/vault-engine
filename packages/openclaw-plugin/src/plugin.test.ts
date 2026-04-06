@@ -395,6 +395,60 @@ describe('openclaw plugin runtime', () => {
     }
   });
 
+  it('before_prompt_build applies session-key scope per passive vault', async () => {
+    const primaryPath = await mkdtemp(join(tmpdir(), 'vault-passive-primary-'));
+    const scopedPath = await mkdtemp(join(tmpdir(), 'vault-passive-scoped-'));
+    const primaryIndex = createMockIndex();
+    const scopedIndex = createMockIndex();
+    rebuildIndexMock.mockResolvedValueOnce(primaryIndex).mockResolvedValueOnce(scopedIndex);
+    queryMock.mockReturnValue(createQueryResult({ query: 'scoped passive query' }));
+
+    const mod = await import('./plugin.js');
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+    const config = createPluginConfig({
+      vaults: [
+        {
+          name: 'primary',
+          description: 'Primary passive vault',
+          vaultPath: primaryPath,
+          mode: 'passive',
+        },
+        {
+          name: 'scoped',
+          description: 'Scoped passive vault',
+          vaultPath: scopedPath,
+          mode: 'passive',
+          scope: {
+            allowSessionKeys: ['agent:cpto:*'],
+          },
+        },
+      ],
+    });
+    const messages = [{ role: 'user', content: 'scoped passive query' }];
+
+    try {
+      await hook({
+        config,
+        messages,
+        sessionKey: 'agent:finance:slack:prod',
+      });
+      await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
+      await hook({
+        config,
+        messages,
+        sessionKey: 'agent:finance:slack:prod',
+      });
+
+      expect(queryMock).toHaveBeenCalledTimes(1);
+      expect(queryMock).toHaveBeenCalledWith(primaryIndex, 'scoped passive query', expect.any(Object));
+      expect(queryMock).not.toHaveBeenCalledWith(scopedIndex, expect.any(String), expect.any(Object));
+    } finally {
+      await rm(primaryPath, { recursive: true, force: true });
+      await rm(scopedPath, { recursive: true, force: true });
+    }
+  });
+
   it('before_prompt_build emits nothing when no passive vault is eligible', async () => {
     rebuildIndexMock.mockResolvedValue(createMockIndex());
     queryMock.mockReturnValue(createQueryResult());
@@ -716,6 +770,79 @@ describe('openclaw plugin runtime', () => {
     } finally {
       await rm(passivePath, { recursive: true, force: true });
       await rm(queryOnlyPath, { recursive: true, force: true });
+    }
+  });
+
+  it('vault_query excludes out-of-scope vaults by default and rejects explicit out-of-scope vault', async () => {
+    const primaryPath = await mkdtemp(join(tmpdir(), 'vault-tool-primary-'));
+    const scopedPath = await mkdtemp(join(tmpdir(), 'vault-tool-scoped-'));
+    const primaryIndex = createMockIndex();
+    const scopedIndex = createMockIndex();
+    rebuildIndexMock.mockResolvedValueOnce(primaryIndex).mockResolvedValueOnce(scopedIndex);
+    queryMock.mockReturnValue(createQueryResult({ query: 'scope constrained' }));
+
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+    const config = createPluginConfig({
+      vaults: [
+        {
+          name: 'primary',
+          description: 'Primary vault',
+          vaultPath: primaryPath,
+          mode: 'passive',
+        },
+        {
+          name: 'scoped',
+          description: 'Scoped vault',
+          vaultPath: scopedPath,
+          mode: 'query-only',
+          scope: {
+            allowSessionKeys: ['agent:cpto:*'],
+          },
+        },
+      ],
+    });
+
+    try {
+      await tool.execute(
+        'req-default-eligible-only',
+        {
+          query: 'scope constrained',
+        },
+        {
+          config,
+          sessionKey: 'agent:finance:slack:prod',
+        }
+      );
+
+      expect(queryMock).toHaveBeenCalledTimes(1);
+      expect(queryMock).toHaveBeenCalledWith(primaryIndex, 'scope constrained', expect.any(Object));
+      expect(queryMock).not.toHaveBeenCalledWith(scopedIndex, expect.any(String), expect.any(Object));
+
+      queryMock.mockClear();
+
+      await expect(
+        tool.execute(
+          'req-explicit-oos',
+          {
+            query: 'scope constrained',
+            vault: 'scoped',
+          },
+          {
+            config,
+            sessionKey: 'agent:finance:slack:prod',
+          }
+        )
+      ).rejects.toThrow('vault_query unavailable: current session is out of scope');
+
+      expect(queryMock).not.toHaveBeenCalled();
+    } finally {
+      await rm(primaryPath, { recursive: true, force: true });
+      await rm(scopedPath, { recursive: true, force: true });
     }
   });
 
