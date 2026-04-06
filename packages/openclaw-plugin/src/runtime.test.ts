@@ -109,4 +109,27 @@ describe('session-key scope rules', () => {
       denySessionKeys: ['agent:cpto:slack:*'],
     });
   });
+
+  it('parses mixed exact + glob session-key scope values', () => {
+    const parsed = parseConfig({
+      plugins: {
+        entries: {
+          'vault-engine': {
+            config: {
+              vaultPath: '/tmp',
+              scope: {
+                allowSessionKeys: [' agent:cpto:slack:prod ', 'agent:cpto:*'],
+                denySessionKeys: [' agent:cpto:slack:sandbox:* '],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(parsed?.scope).toEqual({
+      allowSessionKeys: ['agent:cpto:slack:prod', 'agent:cpto:*'],
+      denySessionKeys: ['agent:cpto:slack:sandbox:*'],
+    });
+  });
 });

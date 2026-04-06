@@ -108,7 +108,8 @@ Behavior:
 - Uses `before_prompt_build` to inject retrieval context automatically.
 - Registers the `vault_query` tool for explicit deeper retrieval.
 - Shares one engine singleton between passive injection and tool calls.
-- `scope.allowSessionKeys` + `scope.denySessionKeys` match full session keys with exact or `*` glob patterns (`deny` overrides `allow`).
+- `scope.allowSessionKeys` + `scope.denySessionKeys` match full session keys with exact or `*` glob patterns.
+- Scope precedence: `deny` overrides `allow`; when any allow rules exist unmatched sessions are denied; with no allow rules sessions are allowed unless denied.
 
 ## `vault_query` Tool Usage
 
