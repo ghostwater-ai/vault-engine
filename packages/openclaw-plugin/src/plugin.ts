@@ -81,7 +81,7 @@ async function beforePromptBuild(args: BeforePromptBuildArgs): Promise<HookResul
 const configSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['vaults'],
+  anyOf: [{ required: ['vaults'] }, { required: ['vaultPath'] }],
   properties: {
     vaults: {
       type: 'array',
@@ -109,6 +109,21 @@ const configSchema = {
               },
             },
           },
+        },
+      },
+    },
+    vaultPath: { type: 'string', minLength: 1 },
+    scope: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        allowSessionKeys: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+        },
+        denySessionKeys: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
         },
       },
     },

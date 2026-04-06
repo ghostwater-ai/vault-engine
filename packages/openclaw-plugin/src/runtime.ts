@@ -232,11 +232,16 @@ export function parseConfig(input: unknown): PluginConfig | undefined {
     }
 
     const parsedVaults: VaultConfig[] = [];
+    const seenVaultNames = new Set<string>();
     for (const rawVault of resolved.vaults) {
       const parsedVault = parseVaultEntry(rawVault);
       if (!parsedVault) {
         return undefined;
       }
+      if (seenVaultNames.has(parsedVault.name)) {
+        return undefined;
+      }
+      seenVaultNames.add(parsedVault.name);
       parsedVaults.push(parsedVault);
     }
 

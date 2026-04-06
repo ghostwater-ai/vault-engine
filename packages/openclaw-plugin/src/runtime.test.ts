@@ -228,6 +228,27 @@ describe('session-key scope rules', () => {
     expect(parsed).toBeUndefined();
   });
 
+  it('rejects multi-vault config with duplicate vault names', () => {
+    const parsed = parseConfig({
+      vaults: [
+        {
+          name: 'Main',
+          description: 'Primary vault',
+          vaultPath: '/tmp/main',
+          mode: 'passive',
+        },
+        {
+          name: 'Main',
+          description: 'Duplicate name vault',
+          vaultPath: '/tmp/other',
+          mode: 'query-only',
+        },
+      ],
+    });
+
+    expect(parsed).toBeUndefined();
+  });
+
   it('maps legacy single-vault config to one passive vault entry', () => {
     const parsed = parseConfig({
       vaultPath: '/tmp',

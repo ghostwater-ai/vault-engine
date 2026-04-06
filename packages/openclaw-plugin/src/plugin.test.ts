@@ -130,10 +130,10 @@ describe('openclaw plugin runtime', () => {
     );
   });
 
-  it('exposes config schema with required vault entries and mode enum', async () => {
+  it('exposes config schema with vault entry requirements, mode enum, and legacy compatibility', async () => {
     const mod = await import('./plugin.js');
     const schema = (mod.plugin as { manifest: { configSchema: Record<string, unknown> } }).manifest.configSchema as {
-      required?: string[];
+      anyOf?: Array<{ required?: string[] }>;
       properties?: Record<string, unknown>;
     };
     const vaults = schema.properties?.vaults as {
@@ -142,7 +142,7 @@ describe('openclaw plugin runtime', () => {
     };
     const mode = vaults.items?.properties?.mode as { enum?: string[] };
 
-    expect(schema.required).toContain('vaults');
+    expect(schema.anyOf).toEqual(expect.arrayContaining([{ required: ['vaults'] }, { required: ['vaultPath'] }]));
     expect(vaults.type).toBe('array');
     expect(vaults.items?.required).toEqual(['name', 'description', 'vaultPath', 'mode']);
     expect(mode.enum).toEqual(['passive', 'query-only']);
@@ -843,6 +843,49 @@ describe('openclaw plugin runtime', () => {
     } finally {
       await rm(primaryPath, { recursive: true, force: true });
       await rm(scopedPath, { recursive: true, force: true });
+    }
+  });
+
+  it('vault_query rejects explicit unknown vault names', async () => {
+    const primaryPath = await mkdtemp(join(tmpdir(), 'vault-tool-unknown-'));
+    const primaryIndex = createMockIndex();
+    rebuildIndexMock.mockResolvedValueOnce(primaryIndex);
+    queryMock.mockReturnValue(createQueryResult({ query: 'unknown vault' }));
+
+    const mod = await import('./plugin.js');
+    const registerTool = vi.fn();
+    (mod.plugin as { register: (api: { registerTool: (tool: RegisteredTool) => void }) => void }).register({
+      registerTool,
+    });
+    const tool = registerTool.mock.calls[0]?.[0] as RegisteredTool;
+    const config = createPluginConfig({
+      vaults: [
+        {
+          name: 'primary',
+          description: 'Primary vault',
+          vaultPath: primaryPath,
+          mode: 'passive',
+        },
+      ],
+    });
+
+    try {
+      await expect(
+        tool.execute(
+          'req-unknown-vault',
+          {
+            query: 'unknown vault',
+            vault: 'does-not-exist',
+          },
+          {
+            config,
+          }
+        )
+      ).rejects.toThrow('vault_query unavailable: unknown vault "does-not-exist"');
+
+      expect(queryMock).not.toHaveBeenCalled();
+    } finally {
+      await rm(primaryPath, { recursive: true, force: true });
     }
   });
 
