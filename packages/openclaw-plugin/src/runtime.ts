@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
-import type { QueryResult, VaultIndex } from '@ghostwater/vault-engine';
+import type { QueryResult, ScoredDocument, VaultIndex } from '@ghostwater/vault-engine';
 import { query, rebuildIndex } from '@ghostwater/vault-engine';
 
 interface Logger {
@@ -40,6 +40,13 @@ export interface ReadyVaultEngine {
   vault: VaultConfig;
   index: VaultIndex;
 }
+
+export interface PassiveCandidateVaultMetadata {
+  vaultName: string;
+  vaultDescription: string;
+}
+
+export type PassiveCandidate = ScoredDocument & PassiveCandidateVaultMetadata;
 
 export interface HookMessage {
   role?: string;
@@ -550,14 +557,23 @@ export function runPassiveQuery(
     };
   }
 
-  const results = passiveVaults.map((readyVault) =>
-    query(readyVault.index, queryText, {
+  const results = passiveVaults.map((readyVault) => {
+    const vaultResult = query(readyVault.index, queryText, {
       maxResults: FIXED_QUERY_MAX_RESULTS,
       minScore: config.injection.minScore,
       minBm25Score: config.injection.minBm25Score,
       context,
-    })
-  );
+    });
+
+    return {
+      ...vaultResult,
+      results: vaultResult.results.map((result) => ({
+        ...result,
+        vaultName: readyVault.vault.name,
+        vaultDescription: readyVault.vault.description,
+      })),
+    };
+  });
 
   return mergeQueryResults(queryText, results, config.injection.maxResults);
 }
