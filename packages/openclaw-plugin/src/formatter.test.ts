@@ -83,6 +83,27 @@ describe('formatAppendSystemContext', () => {
     expect(output).not.toContain('### Archive');
   });
 
+  it('groups interleaved passive winners under a single heading per vault', () => {
+    const result = createQueryResult([
+      createScoredDocument('Team 1', 'a', 0.95, {}, 'Team'),
+      createScoredDocument('Archive 1', 'b', 0.9, {}, 'Archive'),
+      createScoredDocument('Team 2', 'c', 0.85, {}, 'Team'),
+    ]);
+
+    const output = formatAppendSystemContext(result, {
+      maxTokens: 1500,
+      availableVaults: [
+        { name: 'Team', description: 'Primary team memory', mode: 'passive' },
+        { name: 'Archive', description: 'Secondary memory', mode: 'passive' },
+      ],
+    });
+
+    expect(output).toBeDefined();
+    expect(output).toContain('### Team\n\n[belief|high] Team 1\na\n\n[belief|high] Team 2\nc');
+    expect(output).toContain('### Archive\n\n[belief|high] Archive 1\nb');
+    expect(output!.match(/### Team/g)).toHaveLength(1);
+  });
+
   it('limits output to top 3 results before grouping', () => {
     const result = createQueryResult([
       createScoredDocument('A', 'a', 1, {}, 'Vault 1'),
@@ -206,5 +227,12 @@ describe('formatAppendSystemContext', () => {
     expect(
       formatAppendSystemContext(createQueryResult([]), { maxTokens: 1500, availableVaults: defaultAvailableVaults })
     ).toBeUndefined();
+  });
+
+  it('returns undefined when no passive result survives token budgeting', () => {
+    const veryLongDescription = 'z'.repeat(5000);
+    const result = createQueryResult([createScoredDocument('Too Long', veryLongDescription, 0.9, {}, 'Team')]);
+
+    expect(formatAppendSystemContext(result, { maxTokens: 60, availableVaults: defaultAvailableVaults })).toBeUndefined();
   });
 });

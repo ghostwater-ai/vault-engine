@@ -381,7 +381,7 @@ describe('openclaw plugin runtime', () => {
 
       await hook({ config, messages });
       await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
-      await hook({ config, messages });
+      const result = await hook({ config, messages });
 
       expect(queryMock).toHaveBeenCalledTimes(1);
       expect(queryMock).toHaveBeenCalledWith(
@@ -389,6 +389,14 @@ describe('openclaw plugin runtime', () => {
         'passive query',
         expect.objectContaining({ maxResults: 3 })
       );
+      expect(result).toEqual({
+        appendSystemContext: expect.stringContaining('Available vaults:'),
+      });
+      const appendSystemContext = (result as { appendSystemContext?: string }).appendSystemContext;
+      expect(appendSystemContext).toContain('- primary: Primary passive vault');
+      expect(appendSystemContext).toContain('- archive (query-only): Archive query-only vault');
+      expect(appendSystemContext).toContain('### primary');
+      expect(appendSystemContext).not.toContain('### archive');
     } finally {
       await rm(passivePath, { recursive: true, force: true });
       await rm(queryOnlyPath, { recursive: true, force: true });

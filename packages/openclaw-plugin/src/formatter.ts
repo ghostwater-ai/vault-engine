@@ -73,18 +73,23 @@ interface FormattedPassiveChunk {
 }
 
 function renderGroupedResultSections(chunks: FormattedPassiveChunk[]): string[] {
-  const sections: string[] = [];
-  let currentVaultName: string | undefined;
-
+  const sectionsByVault = new Map<string, string[]>();
+  const vaultOrder: string[] = [];
   for (const chunk of chunks) {
-    const vaultName = chunk.vaultName;
-    if (vaultName !== currentVaultName) {
-      sections.push(`### ${vaultName}`);
-      currentVaultName = vaultName;
+    const existing = sectionsByVault.get(chunk.vaultName);
+    if (existing) {
+      existing.push(chunk.text);
+      continue;
     }
-    sections.push(chunk.text);
+    sectionsByVault.set(chunk.vaultName, [chunk.text]);
+    vaultOrder.push(chunk.vaultName);
   }
 
+  const sections: string[] = [];
+  for (const vaultName of vaultOrder) {
+    sections.push(`### ${vaultName}`);
+    sections.push(...(sectionsByVault.get(vaultName) ?? []));
+  }
   return sections;
 }
 
