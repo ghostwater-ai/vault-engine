@@ -9,9 +9,10 @@ const repoRoot = resolve(__dirname, '../../..');
 const pluginPackageDir = resolve(repoRoot, 'packages/openclaw-plugin');
 const pluginRuntimeDistPath = resolve(pluginPackageDir, 'dist/runtime.js');
 const runtimeImportEdgePatterns = [
-  /(?:^|\s)from\s*['"]@ghostwater\/vault-engine['"]/,
-  /(?:^|\s)import\s*\(\s*['"]@ghostwater\/vault-engine['"]\s*\)/,
-  /(?:^|\s)require\s*\(\s*['"]@ghostwater\/vault-engine['"]\s*\)/,
+  /(?:^|[^\w$])import\s*['"]@ghostwater\/vault-engine['"]/,
+  /(?:^|[^\w$])from\s*['"]@ghostwater\/vault-engine['"]/,
+  /(?:^|[^\w$])import\s*\(\s*['"]@ghostwater\/vault-engine['"]\s*\)/,
+  /(?:^|[^\w$])require\s*\(\s*['"]@ghostwater\/vault-engine['"]\s*\)/,
 ];
 
 function hasRuntimeImportEdge(source: string): boolean {
