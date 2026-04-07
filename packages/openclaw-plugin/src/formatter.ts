@@ -68,11 +68,11 @@ interface PassiveResultWithVaultMetadata extends ScoredDocument {
 }
 
 interface FormattedPassiveChunk {
-  vaultName: string;
+  vaultName?: string;
   text: string;
 }
 
-function renderGroupedResultSections(chunks: FormattedPassiveChunk[]): string[] {
+function renderGroupedResultSections(chunks: Array<{ vaultName: string; text: string }>): string[] {
   const sectionsByVault = new Map<string, string[]>();
   const vaultOrder: string[] = [];
   for (const chunk of chunks) {
@@ -93,6 +93,19 @@ function renderGroupedResultSections(chunks: FormattedPassiveChunk[]): string[] 
   return sections;
 }
 
+function renderResultSections(chunks: FormattedPassiveChunk[]): string[] {
+  const hasVaultMetadata = chunks.some((chunk) => chunk.vaultName);
+  if (!hasVaultMetadata) {
+    return chunks.map((chunk) => chunk.text);
+  }
+
+  const groupedChunks = chunks.map((chunk) => ({
+    vaultName: chunk.vaultName ?? 'Unknown Vault',
+    text: chunk.text,
+  }));
+  return renderGroupedResultSections(groupedChunks);
+}
+
 export function formatAppendSystemContext(
   queryResult: QueryResult,
   options: InjectionFormatOptions
@@ -108,7 +121,7 @@ export function formatAppendSystemContext(
     const rawChunk = formatResult(result);
     const text = truncateToTokenCap(rawChunk, PER_RESULT_TOKEN_CAP);
     return {
-      vaultName: result.vaultName ?? 'Unknown Vault',
+      vaultName: result.vaultName,
       text,
     };
   });
@@ -125,8 +138,8 @@ export function formatAppendSystemContext(
 
   let keptChunks = [...formattedChunks];
   while (keptChunks.length > 0) {
-    const groupedSections = renderGroupedResultSections(keptChunks);
-    const rendered = [...baseParts, ...groupedSections].join(SEPARATOR);
+    const sections = renderResultSections(keptChunks);
+    const rendered = [...baseParts, ...sections].join(SEPARATOR);
     if (estimateTokenCount(rendered) <= availableTokens) {
       return rendered;
     }

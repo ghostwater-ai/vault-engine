@@ -83,6 +83,19 @@ describe('formatAppendSystemContext', () => {
     expect(output).not.toContain('### Archive');
   });
 
+  it('preserves legacy flat formatting when vault metadata is absent', () => {
+    const result = createQueryResult([
+      createScoredDocument('Legacy A', 'a'),
+      createScoredDocument('Legacy B', 'b'),
+    ]);
+
+    const output = formatAppendSystemContext(result, { maxTokens: 1500 });
+    expect(output).toContain('[belief|high] Legacy A\na');
+    expect(output).toContain('[belief|high] Legacy B\nb');
+    expect(output).not.toContain('### ');
+    expect(output).not.toContain('Unknown Vault');
+  });
+
   it('groups interleaved passive winners under a single heading per vault', () => {
     const result = createQueryResult([
       createScoredDocument('Team 1', 'a', 0.95, {}, 'Team'),
