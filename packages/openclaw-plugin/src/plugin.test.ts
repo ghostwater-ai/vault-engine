@@ -475,6 +475,33 @@ describe('openclaw plugin runtime', () => {
     expect(queryMock).not.toHaveBeenCalled();
   });
 
+  it('before_prompt_build emits nothing when passive candidates do not survive query filtering', async () => {
+    rebuildIndexMock.mockResolvedValue(createMockIndex());
+    queryMock.mockReturnValue(createQueryResult({ results: [] }));
+
+    const mod = await import('./plugin.js');
+    const hook = (mod.plugin as { hooks: { before_prompt_build: (args: unknown) => Promise<unknown> } }).hooks
+      .before_prompt_build;
+    const config = createPluginConfig({
+      vaults: [
+        {
+          name: 'primary',
+          description: 'Primary passive vault',
+          vaultPath: '/tmp',
+          mode: 'passive',
+        },
+      ],
+    });
+    const messages = [{ role: 'user', content: 'strict thresholds' }];
+
+    await hook({ config, messages });
+    await vi.waitFor(() => expect(mod.__testing.getState()).toBe('ready'));
+    const result = await hook({ config, messages });
+
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(result).toBeUndefined();
+  });
+
   it('vault_query forwards input and returns QueryResult without transformation', async () => {
     rebuildIndexMock.mockResolvedValue(createMockIndex());
     const queryResult = createQueryResult({ query: 'memory systems' });

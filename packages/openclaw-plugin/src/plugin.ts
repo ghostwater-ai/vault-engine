@@ -5,6 +5,7 @@ import {
   __testing as runtimeTesting,
   beginEngineInitialization,
   disableForMissingConfig,
+  getEligibleVaultsForTool,
   getReadyEngineVaults,
   getUserMessages,
   parseConfig,
@@ -66,9 +67,12 @@ async function beforePromptBuild(args: BeforePromptBuildArgs): Promise<HookResul
     return;
   }
 
-  const result = runPassiveQuery(readyVaults, userMessages, config, resolveSessionKey(args));
+  const sessionKey = resolveSessionKey(args);
+  const result = runPassiveQuery(readyVaults, userMessages, config, sessionKey);
+  const visibleVaults = getEligibleVaultsForTool(readyVaults, sessionKey).vaults.map((readyVault) => readyVault.vault);
   const appendSystemContext = formatAppendSystemContext(result, {
     maxTokens: config.injection.maxTokens,
+    availableVaults: visibleVaults,
   });
 
   if (!appendSystemContext) {

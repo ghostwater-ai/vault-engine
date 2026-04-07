@@ -1,7 +1,13 @@
 import type { QueryResult, ScoredDocument } from '@ghostwater/vault-engine';
+import type { VaultMode } from './runtime.js';
 
 export interface InjectionFormatOptions {
   maxTokens: number;
+  availableVaults?: Array<{
+    name: string;
+    description: string;
+    mode: VaultMode;
+  }>;
 }
 
 const HEADER = '## Vault Context';
@@ -9,6 +15,8 @@ const MAX_RESULTS = 3;
 const PER_RESULT_TOKEN_CAP = 400;
 const TOTAL_TOKEN_CAP = 1500;
 const SEPARATOR = '\n\n';
+const EXPLANATION =
+  'Vaults are curated knowledge bases. Use `vault_query` when you need deeper or targeted retrieval.';
 
 function estimateTokenCount(text: string): number {
   return Math.ceil(text.length / 4);
@@ -50,6 +58,36 @@ function formatResult(result: ScoredDocument): string {
   return `${header}\n${result.doc.description}`;
 }
 
+function formatAvailableVault(vault: { name: string; description: string; mode: VaultMode }): string {
+  const modeLabel = vault.mode === 'query-only' ? ' (query-only)' : '';
+  return `- ${vault.name}${modeLabel}: ${vault.description}`;
+}
+
+interface PassiveResultWithVaultMetadata extends ScoredDocument {
+  vaultName?: string;
+}
+
+interface FormattedPassiveChunk {
+  vaultName: string;
+  text: string;
+}
+
+function renderGroupedResultSections(chunks: FormattedPassiveChunk[]): string[] {
+  const sections: string[] = [];
+  let currentVaultName: string | undefined;
+
+  for (const chunk of chunks) {
+    const vaultName = chunk.vaultName;
+    if (vaultName !== currentVaultName) {
+      sections.push(`### ${vaultName}`);
+      currentVaultName = vaultName;
+    }
+    sections.push(chunk.text);
+  }
+
+  return sections;
+}
+
 export function formatAppendSystemContext(
   queryResult: QueryResult,
   options: InjectionFormatOptions
@@ -59,33 +97,36 @@ export function formatAppendSystemContext(
   }
 
   const availableTokens = Math.min(TOTAL_TOKEN_CAP, Math.max(1, Math.floor(options.maxTokens)));
-  const selectedResults = queryResult.results.slice(0, MAX_RESULTS);
-  const usedTokens = estimateTokenCount(HEADER);
-  if (usedTokens > availableTokens) {
-    return undefined;
-  }
+  const selectedResults = queryResult.results.slice(0, MAX_RESULTS) as PassiveResultWithVaultMetadata[];
 
-  const chunks: Array<{ text: string; tokens: number }> = [];
-  for (const result of selectedResults) {
+  const formattedChunks = selectedResults.map((result) => {
     const rawChunk = formatResult(result);
     const text = truncateToTokenCap(rawChunk, PER_RESULT_TOKEN_CAP);
-    const tokens = estimateTokenCount(text);
-    chunks.push({ text, tokens });
-  }
+    return {
+      vaultName: result.vaultName ?? 'Unknown Vault',
+      text,
+    };
+  });
 
-  const separatorTokens = estimateTokenCount(SEPARATOR);
-  let totalTokens = usedTokens + chunks.reduce((acc, chunk) => acc + chunk.tokens + separatorTokens, 0);
-  while (totalTokens > availableTokens && chunks.length > 0) {
-    const removed = chunks.pop();
-    if (!removed) {
-      break;
-    }
-    totalTokens -= removed.tokens + separatorTokens;
+  const availableVaults = options.availableVaults ?? [];
+  const baseParts = [HEADER, EXPLANATION];
+  if (availableVaults.length > 0) {
+    baseParts.push(['Available vaults:', ...availableVaults.map((vault) => formatAvailableVault(vault))].join('\n'));
   }
-
-  if (chunks.length === 0) {
+  const baseText = baseParts.join(SEPARATOR);
+  if (estimateTokenCount(baseText) > availableTokens) {
     return undefined;
   }
 
-  return [HEADER, ...chunks.map((chunk) => chunk.text)].join(SEPARATOR);
+  let keptChunks = [...formattedChunks];
+  while (keptChunks.length > 0) {
+    const groupedSections = renderGroupedResultSections(keptChunks);
+    const rendered = [...baseParts, ...groupedSections].join(SEPARATOR);
+    if (estimateTokenCount(rendered) <= availableTokens) {
+      return rendered;
+    }
+    keptChunks.pop();
+  }
+
+  return undefined;
 }
