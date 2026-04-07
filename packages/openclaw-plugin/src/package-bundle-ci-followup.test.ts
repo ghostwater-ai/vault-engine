@@ -3,20 +3,60 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(__dirname, '../../..');
 const pluginPackageDir = resolve(repoRoot, 'packages/openclaw-plugin');
 const pluginRuntimeDistPath = resolve(pluginPackageDir, 'dist/runtime.js');
-const runtimeImportEdgePatterns = [
-  /(?:^|[^\w$])import\s*['"]@ghostwater\/vault-engine['"]/,
-  /(?:^|[^\w$])from\s*['"]@ghostwater\/vault-engine['"]/,
-  /(?:^|[^\w$])import\s*\(\s*['"]@ghostwater\/vault-engine['"]\s*\)/,
-  /(?:^|[^\w$])require\s*\(\s*['"]@ghostwater\/vault-engine['"]\s*\)/,
-];
+const workspacePackageName = '@ghostwater/vault-engine';
 
 function hasRuntimeImportEdge(source: string): boolean {
-  return runtimeImportEdgePatterns.some((pattern) => pattern.test(source));
+  const sourceFile = ts.createSourceFile('runtime.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  let hasEdge = false;
+
+  const isWorkspaceLiteral = (node: ts.Expression | undefined): boolean =>
+    Boolean(node && ts.isStringLiteral(node) && node.text === workspacePackageName);
+
+  const visit = (node: ts.Node): void => {
+    if (hasEdge) {
+      return;
+    }
+
+    if (ts.isImportDeclaration(node) && isWorkspaceLiteral(node.moduleSpecifier)) {
+      hasEdge = true;
+      return;
+    }
+
+    if (ts.isExportDeclaration(node) && isWorkspaceLiteral(node.moduleSpecifier)) {
+      hasEdge = true;
+      return;
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'require' &&
+      isWorkspaceLiteral(node.arguments[0])
+    ) {
+      hasEdge = true;
+      return;
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      isWorkspaceLiteral(node.arguments[0])
+    ) {
+      hasEdge = true;
+      return;
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+  return hasEdge;
 }
 
 describe('openclaw plugin packaging CI follow-up', () => {
