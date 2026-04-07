@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -26,12 +26,10 @@ describe('openclaw plugin packaging CI follow-up', () => {
       const installDir = mkdtempSync(join(tmpdir(), 'openclaw-plugin-install-'));
 
       try {
-        if (!existsSync(pluginRuntimeDistPath)) {
-          execSync('pnpm build', {
-            cwd: pluginPackageDir,
-            stdio: 'pipe',
-          });
-        }
+        execSync('pnpm build', {
+          cwd: pluginPackageDir,
+          stdio: 'pipe',
+        });
 
         execSync(`pnpm pack --pack-destination "${packDir}"`, {
           cwd: pluginPackageDir,
@@ -78,7 +76,7 @@ describe('openclaw plugin packaging CI follow-up', () => {
             ].join(' '),
             { cwd: installDir, stdio: 'pipe' }
           )
-        ).not.toThrowError(/Cannot find (module|package) ['"]@ghostwater\/vault-engine['"]/);
+        ).not.toThrow();
       } finally {
         rmSync(packDir, { recursive: true, force: true });
         rmSync(installDir, { recursive: true, force: true });
