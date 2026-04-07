@@ -54,6 +54,14 @@ describe('openclaw plugin packaging CI follow-up', () => {
               name: 'openclaw-plugin-pack-test',
               private: true,
               type: 'module',
+              pnpm: {
+                overrides: {
+                  chokidar: '5.0.0',
+                  'gray-matter': '4.0.3',
+                  minisearch: '7.2.0',
+                  stemmer: '2.0.1',
+                },
+              },
             },
             null,
             2
